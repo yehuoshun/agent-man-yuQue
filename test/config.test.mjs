@@ -93,8 +93,10 @@ test('找本体：AGENT_MAN_BIN 优先，其次 PATH，再次 AGENT_MAN_REPO，�
   assert.equal(viaRepo.from, 'AGENT_MAN_REPO')
   assert.deepEqual(viaRepo.prefix, [path.join('C:\\fake\\repo', 'bin', 'agent-man.mjs')])
 
+  // 三处都不给、PATH 上也没有：69，文案锁死（骨架照这行字给人看）。
   assert.throws(() => resolveAgentMan({ PATH: '' }),
-    (e) => e.exitCode === 69 && e.message.includes('AGENT_MAN_BIN'))
+    (e) => e.exitCode === 69 &&
+      e.message === '找不到 agent-man：设 AGENT_MAN_BIN、AGENT_MAN_REPO，或把 agent-man 放进 PATH')
 })
 
 test('PATH 上找 agent-man：找不到返回 null，找到必须是文件', () => {
