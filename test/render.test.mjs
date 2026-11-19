@@ -3,6 +3,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { hashOf, renderMemory, renderSituation, stampOf } from '../src/index.mjs'
+import { FAKE_AT } from './helpers.mjs'
 
 const HOME = 'C:\\fake\\agent-man'
 const VERSION = '0.1.0-fake'
@@ -32,11 +33,11 @@ test('记忆正文把三块都标出来源，并排成可读的表', () => {
       items: [{
         key: '她怕冷',
         fact: '空调不低于 22 度',
-        at: 1795105192643,
+        at: FAKE_AT,
         evidence: { ids: ['e-1', 'e-2'] },
       }],
     },
-    rules: { items: [{ text: '夜里十一点后不提工作', why: '她只回了个嗯', at: 1795105192643 }] },
+    rules: { items: [{ text: '夜里十一点后不提工作', why: '她只回了个嗯', at: FAKE_AT }] },
     self: { text: '## 2026-11-19\n我是她的搭子。\n' },
     stamp: stampOf(new Date('2026-11-20T00:31:12+08:00')),
     home: HOME,
@@ -54,7 +55,7 @@ test('记忆正文把三块都标出来源，并排成可读的表', () => {
 
 test('记忆里的事实含竖线也不许把表格切开（转义掉）', () => {
   const out = renderMemory({
-    memory: { items: [{ key: 'a|b', fact: 'x | y', at: 1795105192643 }] },
+    memory: { items: [{ key: 'a|b', fact: 'x | y', at: FAKE_AT }] },
     rules: { items: [] },
     self: { text: '' },
     stamp: '2026-11-20T00:31:12+08:00',

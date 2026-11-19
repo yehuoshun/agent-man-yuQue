@@ -6,7 +6,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { main, loadState, statePath } from '../src/index.mjs'
-import { MOCK_TOKEN, SCENARIO_DEFAULT, clearDir, makeAgentMan, startYuque } from './helpers.mjs'
+import { FAKE_AT, MOCK_TOKEN, SCENARIO_DEFAULT, clearDir, makeAgentMan, startYuque } from './helpers.mjs'
 
 // 本体给一条建议行的预算按 cost 算（半角 0.28 / 全角 1.0，再加 LINE_OVERHEAD 8）；这里按同口径复核。
 const WIDE = /[\u2E80-\u303E\uFF00-\uFF60\u2600-\u27BF]|[\u{1F000}-\u{1FAFF}]/u
@@ -169,9 +169,12 @@ test('sync 内容变了：走 PUT 而不是 POST，正文换成新的', async ()
     const after = h.yuque.requests.slice(before)
     assert.deepEqual(after.map((one) => one.method), ['GET', 'GET', 'PUT'], '先查库、判存在、再更新')
     assert.ok(h.yuque.docs.get('agent-man-situation').body.includes('换了一天'))
-    assert.equal(h.yuque.state.repo.items_count, undefined, '创建/更新都不许带 public 字段')
+    const repoPuts = h.yuque.requests.filter((one) => one.method === 'PUT' && one.path.endsWith('/mock-book'))
+    for (const one of repoPuts) assert.deepEqual(Object.keys(one.body), ['toc'], '改库只许带 toc，不碰别的库设置')
     const created = h.yuque.requests.filter((one) => one.method === 'POST')
-    for (const one of created) assert.equal('public' in one.body, false)
+    for (const one of created) assert.equal(one.body.public, 0, '新建时 public 显式写 0，绝不留给默认值')
+    const updated = h.yuque.requests.filter((one) => one.method === 'PUT' && one.body.body !== undefined)
+    for (const one of updated) assert.equal('public' in one.body, false, '更新不碰 public：不偷偷改已有文档的可见性')
   } finally {
     await h.cleanup()
   }
@@ -181,7 +184,7 @@ test('--only memory 只动记忆一篇，别的篇目一个请求都不发', asy
   const h = await harness()
   try {
     await h.run(['sync'])
-    h.agent.set({ rules: { items: [{ text: '新规矩', why: '因为', at: 1795105192643 }] } })
+    h.agent.set({ rules: { items: [{ text: '新规矩', why: '因为', at: FAKE_AT }] } })
     const before = h.yuque.requests.length
     const r = await h.run(['sync', '--only', 'memory'], '2026-11-20T10:00:00+08:00')
     assert.equal(r.code, 0, r.err)
