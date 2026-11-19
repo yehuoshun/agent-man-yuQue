@@ -4,7 +4,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 
-// 默认库按用户指定钉死 mock-book（facts.md §2：它是私密库、public:0、空库）。
+// 默认库按用户指定钉死 mock-book（详见 docs/yuque-api-facts.md：它是私密库、public:0、空库）。
 export const DEFAULT_NAMESPACE = 'mock-user/mock-book'
 // 基址可覆盖是硬要求：本地假服务、代理、将来换域名都只改环境变量。
 export const DEFAULT_BASE = 'https://www.yuque.com/api/v2'

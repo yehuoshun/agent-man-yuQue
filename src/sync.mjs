@@ -21,7 +21,9 @@ function firstLine(text) {
   return lines.length === 0 ? '' : lines[0]
 }
 
-// 调本体：一条命令一个进程，stdout 只当数据用。本体找不到/说不行都算依赖缺失（69）。
+// 调本体：一条命令一个进程，stdout 只当数据用。
+// 退出码契约要分清三件事：本体超时（timeout / 被杀）是 75（超时，不是缺失），
+// 本体找不到是 69（依赖缺失），本体自己说不（非 0 且 stderr 有原文）也是 69，但要把原文带上。
 export function runAgentMan(bin, args, options = {}) {
   const env = options.env ?? process.env
   const timeoutMs = options.timeoutMs ?? RUN_TIMEOUT_MS
@@ -37,8 +39,9 @@ export function runAgentMan(bin, args, options = {}) {
   })
   if (res.error !== undefined && res.error !== null) {
     const code = res.error.code ?? ''
-    if (code === 'ETIMEDOUT' || res.error.killed === true) {
-      throw fail(69, `agent-man 超过 ${timeoutMs}ms 没答上来（${args.join(' ')}）`)
+    const signal = typeof res.signal === 'string' ? res.signal : ''
+    if (code === 'ETIMEDOUT' || res.error.killed === true || signal !== '') {
+      throw fail(75, `agent-man 超过 ${timeoutMs}ms 没答上来（${args.join(' ')}）`)
     }
     throw fail(69, `起不来 agent-man（${bin.cmd}）：${code === '' ? res.error.message : code}`)
   }
@@ -84,17 +87,21 @@ export function agentManVersion(env = process.env, bin = null) {
   return null
 }
 
-// 取数：context show 要纯文本原样，其余三份要 --json（形状见 tmp/probe-yuque/facts.md）。
+// 取数：四份一律带 --json（形状见 AGENTS.md「数据来源只许走本体 CLI」）。
+// 处境曾经取纯文本原样，但那份原文首行是分钟级时间戳（`agent-man · 2026-11-20 00:31`）：
+// 拿它当哈希输入等于每分钟"内容变了"，sync 每次都写一遍。改取结构化处境后，
+// 时间只进正文、不进哈希（见 render.mjs 的字段判定）。
 export function collectSources(env = process.env) {
   const bin = resolveAgentMan(env)
-  const contextText = runAgentMan(bin, ['context', 'show'], { env }).out
+  const scene = jsonOf(bin, ['context', 'show', '--json'], env)
   const memory = jsonOf(bin, ['memory', 'ls', '--json'], env)
   const rules = jsonOf(bin, ['rule', 'ls', '--json'], env)
   const self = jsonOf(bin, ['self', 'show', '--json'], env)
-  return { bin, contextText, memory, rules, self, home: dataHomeOf(env), version: agentManVersion(env, bin) }
+  return { bin, scene, memory, rules, self, home: dataHomeOf(env), version: agentManVersion(env, bin) }
 }
 
-// 两篇都从本体现取现渲：哈希只算 core（不含生成时刻与页脚），否则幂等永远不成立。
+// 两篇都从本体现取现渲：哈希只算 core，而 core 只由稳定内容构成（不含生成时刻、页脚、
+// 也不含"3h 前 / 夜深了"这类随钟走的文案），否则幂等永远不成立。
 export function buildDocs(env = process.env, options = {}) {
   const now = toDate(options.now)
   const cfg = resolveConfig(env, { tokenFile: options.tokenFile })
@@ -103,7 +110,7 @@ export function buildDocs(env = process.env, options = {}) {
   const docs = cfg.docs.map((spec) => {
     const common = { stamp, home: sources.home, version: sources.version }
     const rendered = spec.key === 'situation'
-      ? renderSituation({ ...common, text: sources.contextText })
+      ? renderSituation({ ...common, scene: sources.scene })
       : renderMemory({ ...common, memory: sources.memory, rules: sources.rules, self: sources.self })
     return { ...spec, core: rendered.core, body: rendered.body, hash: hashOf(rendered.core) }
   })
@@ -202,27 +209,94 @@ export function statusJson(view) {
   })
 }
 
-const YAML_SPECIAL = /^[\s"'-]|[:#{}[\],&*?|<>=!%@`]|\s$/
-const YAML_RESERVED = /^(true|false|null|yes|no|on|off|~)$/i
+// ---- 目录树 --------------------------------------------------------------
+//
+// 真实库的 toc_yml 是语雀内部目录（replay 实测，见 docs/yuque-api-facts.md）：
+//   - type: META
+//     version_id: 0
+//     count: 2
+//   - type: DOC
+//     uuid: …
+//     doc_id: 900001
+//     level: 1
+//     url: agent-man-situation      ← 裸 slug，不是 /ns/slug
+// 所以挂树只有一条正路：先读出已有 DOC 节点判重，再 PUT /repos/{ns}/toc 逐条 appendNode。
+// 整棵 toc_yml 回写（PUT /repos/{ns} + {toc}）会盖掉别人的内部目录，api.mjs 里已经删掉了。
+const KEY_LINE = /^\s*(?:-\s+)?([A-Za-z_][\w-]*):\s*(.*)$/
 
-function yamlScalar(text) {
-  const value = String(text)
-  if (value === '' || YAML_SPECIAL.test(value) || YAML_RESERVED.test(value)) {
-    return `"${value.replace(/"/g, '\\"')}"`
+function scalarOf(text) {
+  const one = text.trim()
+  if (one.length >= 2 && one.startsWith('"') && one.endsWith('"')) {
+    return one.slice(1, -1).replace(/\\"/g, '"')
   }
-  return value
+  if (one.length >= 2 && one.startsWith("'") && one.endsWith("'")) return one.slice(1, -1)
+  return one
 }
 
-// 目录树是全量替换：只在原 toc_yml 上追加缺的节点，META 之类的别人节点原样留着。
-// 解析不了（不是字符串）就返回 null，让调用方跳过 toc 并说明，而不是猜着覆盖。
-export function mergeToc(existing, { namespace, docs }) {
-  if (existing !== undefined && existing !== null && typeof existing !== 'string') return null
-  const head = typeof existing === 'string' ? existing.replace(/\r\n/g, '\n').trimEnd() : ''
-  const added = docs
-    .filter((doc) => head.indexOf(`/${namespace}/${doc.slug}`) === -1)
-    .map((doc) => `- title: ${yamlScalar(doc.title)}\n  url: /${namespace}/${doc.slug}`)
-  if (added.length === 0) return ''
-  return `${head === '' ? '' : `${head}\n`}${added.join('\n')}\n`
+// 只做"读出节点列表"这一件事：读得出就返回节点数组，认不出形状返回 null（调用方据此跳过挂树并说明）。
+// 不去理解 YAML 全集——这是语雀自己生成的文本，我们只要 type / doc_id / url 三个字段。
+export function tocNodesOf(tocYml) {
+  if (tocYml === undefined || tocYml === null || tocYml === '') return []
+  if (typeof tocYml !== 'string') return null
+  const nodes = []
+  let current = null
+  for (const raw of tocYml.replace(/\r\n/g, '\n').split('\n')) {
+    const line = raw.replace(/\s+$/, '')
+    if (line.trim() === '') continue
+    const hit = KEY_LINE.exec(line)
+    if (hit === null) return null
+    if (/^\s*-\s+/.test(line)) {
+      current = {}
+      nodes.push(current)
+    } else if (current === null) {
+      return null
+    }
+    current[hit[1]] = scalarOf(hit[2])
+  }
+  return nodes
+}
+
+// 判重索引：doc_id 或裸 slug，命中任一就算已经在树上。
+// 旧实现只认 `/ns/slug`，而真实节点的 url 是裸 slug → 同一篇文档每 sync 一次就多挂一个节点。
+// 顺手兼容老写法（/ns/slug）：拿最后一段当 slug 比。
+function tocIndex(nodes) {
+  const ids = new Set()
+  const slugs = new Set()
+  for (const node of nodes) {
+    if (String(node?.type ?? '').toUpperCase() !== 'DOC') continue
+    if (node.doc_id !== undefined && node.doc_id !== '') ids.add(String(node.doc_id))
+    if (typeof node.url === 'string' && node.url !== '') {
+      slugs.add(node.url)
+      slugs.add(node.url.replace(/^\/+/, '').split('/').pop())
+    }
+  }
+  return { ids, slugs }
+}
+
+// 还需要挂的文档。节点列表认不出形状时返回 null，由调用方决定"跳过这一趟、下次再挂"。
+export function missingTocDocs(nodes, docs) {
+  if (nodes === null) return null
+  const { ids, slugs } = tocIndex(nodes)
+  return docs.filter((doc) => {
+    if (doc.id !== null && doc.id !== undefined && ids.has(String(doc.id))) return false
+    return !slugs.has(doc.slug)
+  })
+}
+
+// doc_id 原样留着：语雀的 doc_ids 要的是数字，别在最后一步把 1000 变成 '1000'。
+function idValueOf(value) {
+  if (typeof value === 'number' && Number.isFinite(value)) return value
+  if (typeof value === 'string' && value.trim() !== '') return value.trim()
+  return null
+}
+
+// 已经挂过但没记住 id 的文档（上次挂树失败/state 里只记了 slug）：查一次详情补 id。
+// 只在这条补挂路径上多发 GET，正文没变的话平时一个请求都不发。
+async function docIdOf(api, slug) {
+  const found = await api.getDoc(slug)
+  const id = found.exists ? idValueOf(found.doc?.id) : null
+  if (id === null) throw fail(1, `挂目录树缺 doc_id（${slug}）：语雀详情里没有 id，这一趟只补了正文`)
+  return id
 }
 
 function pickDocs(all, only) {
@@ -287,18 +361,23 @@ export async function syncRun(env = process.env, options = {}) {
     timeoutMs: cfg.timeoutMs,
     fetch: options.fetch,
   })
-  const repo = await api.getRepo()
   let wrote = 0
+  // 本次写出来的 doc_id：挂树要用它，别再多查一次详情。
+  const docIds = new Map()
 
   for (const doc of planned) {
     const found = await api.getDoc(doc.slug)
+    let saved
     if (found.exists) {
-      await api.updateDoc(found.doc.slug ?? doc.slug, { title: doc.title, body: doc.body, slug: doc.slug })
+      const patch = { title: doc.title, body: doc.body, slug: doc.slug }
+      saved = await api.updateDoc(found.doc.slug ?? doc.slug, patch)
       report.set(doc.slug, `已更新 ${doc.label} → ${api.docUrl(doc.slug)}`)
     } else {
-      await api.createDoc({ title: doc.title, slug: doc.slug, body: doc.body })
+      saved = await api.createDoc({ title: doc.title, slug: doc.slug, body: doc.body })
       report.set(doc.slug, `已创建 ${doc.label} → ${api.docUrl(doc.slug)}`)
     }
+    const docId = idValueOf(saved?.id ?? found.doc?.id)
+    if (docId !== null) docIds.set(doc.slug, docId)
     state.docs[doc.slug] = {
       title: doc.title,
       url: api.docUrl(doc.slug),
@@ -314,26 +393,30 @@ export async function syncRun(env = process.env, options = {}) {
   // 全部一致也算走了一趟，更新 lastAt（哈希没变，所以下次还是"跳过"）。
   if (wrote === 0) state.lastAt = built.stamp
 
+  // 目录树：只有真动过正文、或上次欠着挂树时才碰它；并且只走 appendNode 增量接口。
+  // 403/401 之类挂不上算"部分成功"：正文已经落库、state 照落，下次只重试挂树。
   let tocProblem = null
-  const includeToc = cfg.toc === true && (wrote > 0 || tocOwed === true)
-  const mounted = cfg.docs.filter((doc) => state.docs[doc.slug] !== undefined)
+  const mounted = cfg.docs
+    .filter((doc) => state.docs[doc.slug] !== undefined)
+    .map((doc) => ({ slug: doc.slug, id: docIds.get(doc.slug) ?? null }))
+  const includeToc = cfg.toc === true && mounted.length > 0 && (wrote > 0 || tocOwed === true)
   if (includeToc) {
-    const toc = mergeToc(repo.toc_yml, { namespace: cfg.namespace, docs: mounted })
-    if (toc === null) {
-      state.tocPending = mounted.length > 0
-      warnings.push('库里的 toc_yml 不是字符串，解析不了：这一次跳过目录树，正文已经写好了')
-    } else if (toc === '') {
-      state.tocPending = false
-      state.tocAt = built.stamp
-    } else {
-      try {
-        await api.putToc(toc)
+    try {
+      const repo = await api.getRepo()
+      const nodes = tocNodesOf(repo.toc_yml)
+      if (nodes === null) {
+        state.tocPending = true
+        warnings.push('库里的 toc_yml 认不出形状（不是节点列表）：这一趟跳过目录树，正文已经写好了')
+      } else {
+        for (const one of missingTocDocs(nodes, mounted)) {
+          await api.appendTocNode(one.id ?? await docIdOf(api, one.slug))
+        }
         state.tocPending = false
         state.tocAt = built.stamp
-      } catch (e) {
-        state.tocPending = true
-        tocProblem = e
       }
+    } catch (e) {
+      state.tocPending = true
+      tocProblem = e
     }
   }
 

@@ -5,11 +5,14 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { emptyState, hashOf, loadState, saveState, statePath } from '../src/index.mjs'
-import { clearDir } from './helpers.mjs'
+import { clearDir, closeAllFakes } from './helpers.mjs'
 
 function tempHome() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'agent-man-yuque-state-'))
 }
+
+// 不启假服务也挂一次兜底：句柄泄漏比断言失败更难查。
+test.after(closeAllFakes)
 
 test('哈希对同一段正文稳定，改一个字就变（幂等靠它判）', () => {
   assert.equal(hashOf('同内容'), hashOf('同内容'))

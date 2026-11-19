@@ -62,6 +62,18 @@ function parseSyncFlags(rest) {
   return flags
 }
 
+// 挂树失败的原文要按原因说话：401/403 才是"缺写权限"，网络错 / 5xx / 形状不对别冤枉成权限。
+// 这些错误都来自 api.mjs，状态码挂在 httpStatus 上（不是每个错都有状态码：网络错就没有）。
+function tocReasonOf(problem) {
+  const message = problem?.message ?? String(problem)
+  const status = typeof problem?.httpStatus === 'number' ? problem.httpStatus : null
+  if (status === 401 || status === 403) {
+    return `缺 repo 写权限（HTTP ${status}）：${message}`
+  }
+  if (status === null) return message
+  return `语雀那边这次没让挂（HTTP ${status}）：${message}`
+}
+
 export async function main(argv = [], ctx = {}) {
   const args = Array.from(argv, (one) => String(one))
   const env = ctx.env ?? process.env
@@ -106,8 +118,7 @@ export async function main(argv = [], ctx = {}) {
       out(`${result.lines.join('\n')}\n`)
       if (flags.dryRun) err('（--dry-run：一个语雀请求都没发）\n')
       if (result.tocProblem !== undefined && result.tocProblem !== null) {
-        const why = result.tocProblem.message ?? String(result.tocProblem)
-        err(`! 正文已更新，目录树未挂上（缺 repo 写权限）：${why}\n`)
+        err(`! 正文已经写好了，目录树没挂上：${tocReasonOf(result.tocProblem)}\n`)
       }
       return result.code
     }

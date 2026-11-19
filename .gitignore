@@ -1,3 +1,10 @@
 node_modules/
 tmp/
 *.log
+
+# 插件自己的运行态：AGENT_MAN_YUQUE_HOME 一旦被指到仓库内，state 不许进库
+.agent-man-yuque/
+state.json
+
+# 原子写的中间文件（state.json 先写 *.tmp 再 rename）
+*.tmp

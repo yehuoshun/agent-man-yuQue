@@ -3,3 +3,6 @@
 *.mjs text eol=lf
 *.json text eol=lf
 *.md text eol=lf
+# bin/ 里的 Windows 垫片也只有两行、没有 label 与 goto，cmd.exe 读 LF 没有问题；
+# 留着 CRLF 反而会让每台机器的 .cmd 各自 dirty。
+*.cmd text eol=lf

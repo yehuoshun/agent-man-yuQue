@@ -17,7 +17,9 @@ npm link            # 把 bin/agent-man-yuQue.mjs 链到全局，本体直接能
 ```
 
 或者干脆把 `bin/` 放进 PATH（Windows 上要让 `agent-man-yuQue.cmd` 这类可执行文件可被发现，
-本体在 Windows 只认 `.exe` / `.cmd` / `.bat`）。
+本体在 Windows 只认 `.exe` / `.cmd` / `.bat`）。添完 PATH 用 `agent-man context sense` 验一眼：
+建议段里出现 `yuQue` 那行，就说明本体已经扫到零件了（本体扫 PATH 上 `agent-man-` 前缀的名字）。
+仓库里带着 `bin/agent-man-yuQue.cmd` 就是为了这件事——没有垫片，Windows 上装完发现不了。
 
 要求：Node ≥ 20，零依赖。
 
@@ -70,8 +72,10 @@ $ agent-man-yuQue status
 
 ```console
 $ agent-man-yuQue status --json
-{"lastAt":"2026-11-20T00:31:12+08:00","tocAt":null,"tocPending":false,"docs":[{"slug":"agent-man-situation","title":"agent-man 处境","url":"https://…","hash":"…","syncedAt":"…","stale":true,"why":"内容变了"}]}
+{"lastAt":"2026-11-20T00:31:12+08:00","tocAt":null,"tocPending":false,"docs":[…]}
 ```
+
+`docs` 里每篇是 `{slug,title,url,hash,syncedAt,stale,why}`，`hash` 是 64 位 sha256。
 
 `why` 只有三种：`还没同步过` / `内容变了` / `一致`。
 
@@ -95,19 +99,26 @@ $ agent-man-yuQue sync                    # 什么都没变：一个请求都不
 - `--dry-run`：只打印将要做什么，**一个请求都不发**（连 GET 都不发）。
 - `--only situation` / `--only memory`：只推一篇（另一篇照常报「没变，跳过」或不动）。
 - 幂等靠 sha256：`state.json` 里记每篇的 `hash`，同一内容不重发。
-  哈希只算**正文的稳定内核**——不含 `同步于 …` 那一行时刻、也不含页脚，
-  否则每次渲染都「变了」，幂等就是假的。
+  哈希只算**正文的稳定内核**，而且这个内核里一个时间都不许有：不含 `同步于 …` 那一行时刻、
+  不含页脚，也不含「夜深了」「3 小时前」「还剩多久」这类相对时间文案——它们每过一分钟就变，
+  混进去幂等就是假的。处境的 `core` 由 `agent-man context show --json` 的稳定字段拼成，
+  字段取舍写在 `src/render.mjs` 顶部的判定表里。
 - 每篇写完立刻落 `state.json`（原子写：tmp → fsync → rename）；中途挂掉不会丢掉已完成的那篇。
 
 ## 两篇文档
 
 | slug（可用环境变量改） | 默认标题 | 正文从哪来 |
 | --- | --- | --- |
-| `agent-man-situation` | agent-man 处境 | `agent-man context show` 的**纯文本原样**（不重排、不造第二份真源），加一行生成时刻与页脚 |
-| `agent-man-memory` | agent-man 记忆 | `agent-man memory ls --json` / `agent-man rule ls --json` / `agent-man self show --json` 排成三块：结论表（槽位/事实/证据/何时）、规矩表（规矩/为什么/何时）、自我块原文 |
+| `agent-man-situation` | agent-man 处境 | `agent-man context show --json` 的处境快照重排 |
+| `agent-man-memory` | agent-man 记忆 | `memory` / `rule` / `self` 三条 `--json` 拼三块 |
 
-记忆那层渲染是插件自己的事——语雀是另一种排版介质，但每块正文里都写清了字段来自哪条命令，
-两边对不上时知道该去查哪条。
+处境那篇排成五块：此刻（`clock` / 静默 / 上次开口 / 积压）、日程、便条、最弱的三条、建议。
+**哈希只吃稳定内核**：`lastSaid`、`backlog.unconsolidated`、`plans[{id,due,text}]`、
+`notes[{id,at,text,trigger,when}]`、`weakest[{id,text}]`；`at` / `clock` / `quiet` / `since` /
+`left` / `late` / `r` / `used` 这些随钟走的东西只进正文、不进哈希。
+
+记忆那篇排三块：结论表（槽位/事实/证据/何时）、规矩表（规矩/为什么/何时）、自我块原文。
+每块正文里都写清了字段来自哪条命令，两边对不上时知道该去查哪条。
 
 ## 配置（全部走环境变量）
 
@@ -122,7 +133,7 @@ $ agent-man-yuQue sync                    # 什么都没变：一个请求都不
 | `AGENT_MAN_YUQUE_TOC` | 开 | 设成 `off` 就不碰目录树 |
 | `AGENT_MAN_YUQUE_SITUATION_SLUG` / `…_TITLE` | 见上表 | 换 slug / 标题 |
 | `AGENT_MAN_YUQUE_MEMORY_SLUG` / `…_TITLE` | 见上表 | 同上 |
-| `AGENT_MAN_BIN` | — | 本体可执行文件；缺省在 PATH 找 `agent-man`，再缺省 `AGENT_MAN_REPO/bin/agent-man.mjs` |
+| `AGENT_MAN_BIN` | — | 本体可执行文件；缺省在 PATH 找 `agent-man`，再缺省用 `AGENT_MAN_REPO` 下面那个 |
 | `AGENT_MAN_REPO` | — | 本体仓库路径（上面那条缺省用） |
 
 数据来源**一律走本体的 CLI**（`agent-man <cmd> --json`），不直接读 `~/.agent-man` 下的文件——
@@ -134,9 +145,9 @@ $ agent-man-yuQue sync                    # 什么都没变：一个请求都不
 | --- | --- |
 | 0 | 成功 |
 | 64 | 参数/用法错（插件自己的事，不该进本体的冷却） |
-| 69 | 依赖缺失：没有令牌、令牌无效/没这个库的写权限、找不到 agent-man、库看不见 |
-| 75 | 网络超时 |
-| 1 | 其它 API 失败（并说明怎么改） |
+| 69 | 依赖缺失、或本体说不：没令牌、令牌无效/没写权限、库看不见、找不到 agent-man、本体给 `! ` 原文 |
+| 75 | 超时：语雀那边没回，或本体 CLI 超时/被杀 |
+| 1 | 其它失败（说明怎么改）；目录树没挂上这种部分成功也退 1 |
 
 所有错误一行 `! ` 走 stderr；stdout 只放结果。
 
@@ -146,20 +157,26 @@ $ agent-man-yuQue sync                    # 什么都没变：一个请求都不
   语雀没有「200 + 错误体」这种花活，按 HTTP 状态判。
 - **只写 markdown**：读 `data.body`（Markdown 原文），写 `format: "markdown"`。
   `body_html` / `body_lake` / `body_draft` 一概不碰——回写它们等于把文档改成另一种格式。
-- **目录树是另一次写**：`POST` 创建后文档不会自己出现在左侧目录里，得再
-  `PUT /repos/{ns}` 带 `toc`（全量替换）。我们只往原有 `toc_yml` 末尾追加自己两篇，
-  不覆盖别人的节点；解析不出来就跳过并在 stderr 说明。
-  缺 `repo` 写权限时这一步会 403——那是**部分成功**：正文已经更新，不谎报 0，
-  stderr 写清「正文已更新，目录树未挂上（缺 repo 写权限）」，退 1，
-  并且在 `state.json` 里记 `tocPending`，下次 `sync` 只补目录树、不重发正文。
+- **目录树得单独挂，而且只能增量挂**：`POST` 创建后文档不会自己出现在左侧目录里，
+  得再 `PUT /repos/{ns}/toc`，body 是 `{"action":"appendNode","action_mode":"sibling","type":"DOC",
+  "doc_ids":[<doc id>]}`——一次挂一个节点，不动别人的。
+  **绝不**再 `PUT /repos/{ns}` 带 `{toc}` 做全量替换：真实 `toc_yml` 是语雀自己的内部目录树
+  （`type: META` / `type: DOC` + `uuid`/`doc_id`/`level`），全量替换会把它整棵盖掉。
+  判重按 `type: DOC` 节点的 `doc_id` 与裸 slug `url` 两个条件匹配，已经挂上就一个请求都不发。
+- **挂树失败算部分成功**：正文已经写好，不谎报 0。`state.json` 照落、退 1，stderr 说清原因——
+  只有 401/403 才叫「缺 repo 写权限（HTTP 403）」，5xx / 网络 / 形状认不出就说那件事本身，
+  不冤枉权限。`state.json` 里记 `tocPending`，下次 `sync` 只补目录树、不重发正文。
+  `AGENT_MAN_YUQUE_TOC=off` 则整段跳过，连库都不查。
 - **不自动重试**：语雀限流是账号级共享额度（5000/小时），撞 429 就停下报原文，不连续轰炸。
-- **可见性**：新建时 `public: 0` 显式写死（facts.md §6），不让「这篇会不会公开」交给库的默认值去决定；
-  更新时**不碰** `public`（不偷偷改已存在文档的可见性）。默认库 `mock-book` 本身是私密的。
+- **可见性**：新建时 `public: 0` 显式写死，不让「这篇会不会公开」交给库的默认值去决定；
+  更新时**不碰** `public`（不偷偷改已存在文档的可见性）。默认库本身是私密的。
+  接口事实都记在 [docs/yuque-api-facts.md](docs/yuque-api-facts.md) 里。
 
 ## 测试
 
 ```powershell
-npm test        # == node --test
+npm test                       # == node --test
+node scripts/check-style.mjs   # 行宽 ≤110 / UTF-8 无 BOM / 零 CRLF，有命中列 文件:行号 并退 1
 ```
 
 用例用 `node:http` 起一个假语雀服务（形状照真实响应抄：`{meta,data}` 双层、`_serializer`、

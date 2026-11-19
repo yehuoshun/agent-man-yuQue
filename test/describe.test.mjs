@@ -4,6 +4,10 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 
 import { main, DESCRIBE, describeLine } from '../src/index.mjs'
+import { closeAllFakes } from './helpers.mjs'
+
+// 契约用例不启假服务，也挂一次兜底：以后往这里加真请求的用例时不会漏句柄。
+test.after(closeAllFakes)
 
 function recorder() {
   const out = []
