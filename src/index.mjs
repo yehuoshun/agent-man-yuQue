@@ -13,7 +13,7 @@ export {
   resolveConfig,
 } from './config.mjs'
 export { docUrlOf, createApi } from './api.mjs'
-export { renderMemory, renderSituation, stampOf } from './render.mjs'
+export { renderMemory, renderSituation, situationCore, stampOf } from './render.mjs'
 export { emptyState, hashOf, loadState, saveState, statePath } from './state.mjs'
 export {
   agentManVersion,
@@ -21,10 +21,11 @@ export {
   agoPhrase,
   buildDocs,
   collectSources,
-  mergeToc,
+  missingTocDocs,
   runAgentMan,
   senseLine,
   statusJson,
   statusView,
   syncRun,
+  tocNodesOf,
 } from './sync.mjs'

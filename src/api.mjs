@@ -1,5 +1,5 @@
 // 语雀 API 客户端：查库、查文档、建/改正文、写目录树四件事。
-// 事实全部按 tmp/probe-yuque/facts.md 钉下来的形状：错误体是 {status,message} 且没有 code 字段，
+// 事实全部按 docs/yuque-api-facts.md 钉下来的形状：错误体是 {status,message} 且没有 code 字段，
 // 判存在只看 HTTP 状态（200 存在 / 404 不存在），认证头是 X-Auth-Token。
 import { fail } from './config.mjs'
 
@@ -10,27 +10,36 @@ export function docUrlOf(namespace, slug) {
   return `https://www.yuque.com/${namespace}/${slug}`
 }
 
+// 状态码一并挂在错误对象上：调用方（sync/main）要按状态说话——401/403 才是权限问题，
+// 5xx / 形状不对 / 网络错不许被冤枉成"缺权限"。
 function statusError(status, data, what) {
   const hasMessage = data !== null && typeof data === 'object' && typeof data.message === 'string'
   const detail = hasMessage ? `：${data.message}` : ''
+  const tag = (e) => {
+    e.httpStatus = status
+    return e
+  }
   if (status === 401) {
-    return fail(69, `令牌无效或过期（${what}）：换 YUQUE_TOKEN 或用 --token-file 指一个文件${detail}`)
+    return tag(fail(69, `令牌无效或过期（${what}）：换 YUQUE_TOKEN 或用 --token-file 指一个文件${detail}`))
   }
   if (status === 403) {
-    return fail(69, `令牌没这个库的写权限（${what}）：确认 YUQUE_NAMESPACE 指对了、令牌 scope 含 doc 写${detail}`)
+    const why = `令牌没这个库的写权限（${what}）：确认 YUQUE_NAMESPACE 对了、令牌含 doc 写${detail}`
+    return tag(fail(69, why))
   }
   if (status === 429) {
-    return fail(1, `语雀限流了（${what}）：这是账号级共享额度，停下等一会儿再同步，别连续重试${detail}`)
+    return tag(fail(1, `语雀限流了（${what}）：这是账号级共享额度，停下等一会儿再同步，别连续重试${detail}`))
   }
   if (status === 404) {
-    return fail(69, `库看不见（${what}）：命名空间不存在，或这个令牌看不到它${detail}`)
+    return tag(fail(69, `库看不见（${what}）：命名空间不存在，或这个令牌看不到它${detail}`))
   }
-  return fail(1, `语雀回了 HTTP ${status}（${what}）${detail}`)
+  return tag(fail(1, `语雀回了 HTTP ${status}（${what}）${detail}`))
 }
 
 export function createApi(options) {
   const { base, namespace, token, timeoutMs, fetch: fetchImpl, userAgent = USER_AGENT } = options
-  if (typeof token !== 'string' || token === '') throw fail(69, '缺语雀令牌：设 YUQUE_TOKEN，或用 --token-file 指一个文件')
+  if (typeof token !== 'string' || token === '') {
+    throw fail(69, '缺语雀令牌：设 YUQUE_TOKEN，或用 --token-file 指一个文件')
+  }
   const root = String(base).replace(/\/+$/, '')
   const nsPath = String(namespace).split('/').map(encodeURIComponent).join('/')
   const doFetch = typeof fetchImpl === 'function' ? fetchImpl : globalThis.fetch
@@ -56,7 +65,8 @@ export function createApi(options) {
     } catch (e) {
       const name = e?.name ?? ''
       if (name === 'TimeoutError' || name === 'AbortError') {
-        throw fail(75, `语雀那边超过 ${timeoutMs}ms 没回（${method} ${pathName}）：网络慢或接口卡住，稍后再试`)
+        const where = `${method} ${pathName}`
+        throw fail(75, `语雀那边超过 ${timeoutMs}ms 没回（${where}）：网络慢或接口卡住，稍后再试`)
       }
       throw fail(1, `连不上语雀（${method} ${pathName}）：${e?.message ?? e}`)
     }
@@ -72,7 +82,8 @@ export function createApi(options) {
       try {
         data = JSON.parse(text)
       } catch {
-        throw fail(1, `语雀回了不是 JSON 的东西（HTTP ${res.status}，${text.length} 字符，${method} ${pathName}）`)
+        const where = `HTTP ${res.status}，${text.length} 字符，${method} ${pathName}`
+        throw fail(1, `语雀回了不是 JSON 的东西（${where}）`)
       }
     }
     return { status: res.status, data }
@@ -105,8 +116,9 @@ export function createApi(options) {
       return { exists: true, doc: bodyOf(res.data) ?? {} }
     },
 
-    // 创建：POST 之后语雀不会自动把它挂进目录树，toc 要另外写（见 putToc）。
-    // `public: 0` 显式写死（facts.md §6/§10-1）：不把「这篇可能公开」交给库的默认值去决定。
+    // 创建：POST 之后语雀不会自动把它挂进目录树，toc 要另外挂（见 appendTocNode）。
+    // 回包里的 data.id 就是挂树要用的 doc_id（拿不到就只能再查一次详情）。
+    // `public: 0` 显式写死（见 docs/yuque-api-facts.md）：不把「这篇可能公开」交给库的默认值去决定。
     async createDoc(payload) {
       const res = await call('POST', `/repos/${nsPath}/docs`, {
         title: payload.title,
@@ -121,7 +133,7 @@ export function createApi(options) {
       return bodyOf(res.data) ?? {}
     },
 
-    // 更新：只带 title/body/format，绝不回写 body_html / body_lake（facts.md §7）。
+    // 更新：只带 title/body/format，绝不回写 body_html / body_lake（见 docs/yuque-api-facts.md）。
     async updateDoc(id, payload) {
       const res = await call('PUT', `/repos/${nsPath}/docs/${encodeURIComponent(id)}`, {
         title: payload.title,
@@ -132,10 +144,18 @@ export function createApi(options) {
       return bodyOf(res.data) ?? {}
     },
 
-    // 目录树：全量替换接口，所以必须先把原值拼进来再发（facts.md §10）。
-    async putToc(toc) {
-      const res = await call('PUT', `/repos/${nsPath}`, { toc })
-      if (res.status !== 200 && res.status !== 204) throw statusError(res.status, res.data, '写目录树')
+    // 目录树：只走官方增量接口 appendNode，一次挂一个节点。
+    // 曾经的 `PUT /repos/{ns}` + `{toc}` 是全量替换：真实库的 toc_yml 是语雀内部目录
+    // （type: META / type: DOC + uuid / doc_id / level），整棵盖掉等于毁掉人家的目录树。
+    // appendNode 不动兄弟节点，也不需要先读改写——读只用来判"是不是已经挂过了"。
+    async appendTocNode(docId) {
+      const res = await call('PUT', `/repos/${nsPath}/toc`, {
+        action: 'appendNode',
+        action_mode: 'sibling',
+        type: 'DOC',
+        doc_ids: [docId],
+      })
+      if (res.status !== 200 && res.status !== 204) throw statusError(res.status, res.data, '挂目录树')
       return true
     },
   }

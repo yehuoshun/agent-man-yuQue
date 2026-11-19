@@ -6,10 +6,13 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { DEFAULT_NAMESPACE, findOnPath, requireToken, resolveAgentMan, resolveConfig } from '../src/index.mjs'
-import { clearDir } from './helpers.mjs'
+import { clearDir, closeAllFakes } from './helpers.mjs'
 
 const HOME = path.join(os.tmpdir(), 'agent-man-yuque-cfg')
 const ENV = { YUQUE_TOKEN: 'mock-token-123', AGENT_MAN_YUQUE_HOME: HOME }
+
+// 这个文件不启假服务，但兜底关一次：以后有人往这里加真请求的用例，句柄也不会漏。
+test.after(closeAllFakes)
 
 test('默认值照产品语义：库 mock-book、基址 api/v2、家目录 .agent-man-yuque', () => {
   const cfg = resolveConfig({ ...ENV }, {})
