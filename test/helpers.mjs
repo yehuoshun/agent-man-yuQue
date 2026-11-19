@@ -17,6 +17,18 @@ const argv = process.argv.slice(2)
 const say = (value) => process.stdout.write(JSON.stringify(value) + '\\n')
 // 每次调用都记账：用例要能证明"四份取数一律带 --json"（处境曾经漏过）。
 fs.appendFileSync(path.join(here, 'calls.jsonl'), JSON.stringify(argv) + '\\n', 'utf8')
+// 真本体对看不懂的 AGENT_MAN_* 会刷一行警告：假件照这个行为演，用例才钉得住"别再把插件的变量透过去"。
+const unknownEnv = Object.keys(process.env).filter((key) => /^AGENT_MAN_YUQUE_/i.test(key)).sort()
+if (unknownEnv.length > 0) {
+  process.stderr.write('! 环境变量 ' + unknownEnv[0] + ' 不对应任何配置键，已忽略\\n')
+}
+// 只记键名与本体的数据目录：令牌的值不落盘，也不进任何一条断言。
+const seenEnv = Object.keys(process.env).filter((key) => /^(?:YUQUE_|AGENT_MAN_)/i.test(key)).sort()
+fs.appendFileSync(path.join(here, 'env.jsonl'), JSON.stringify({
+  argv,
+  keys: seenEnv,
+  home: process.env.AGENT_MAN_HOME ?? '',
+}) + '\\n', 'utf8')
 const sleep = Number(data.sleep ?? 0)
 if (sleep > 0) {
   const until = Date.now() + sleep
@@ -170,6 +182,7 @@ export function makeAgentMan(scenario = {}) {
   const script = path.join(dir, 'fake-agent-man.mjs')
   const file = path.join(dir, 'scenario.json')
   const callsFile = path.join(dir, 'calls.jsonl')
+  const envFile = path.join(dir, 'env.jsonl')
   fs.writeFileSync(script, FAKE_SOURCE, 'utf8')
   const api = {
     dir,
@@ -185,8 +198,14 @@ export function makeAgentMan(scenario = {}) {
       if (!fs.existsSync(callsFile)) return []
       return fs.readFileSync(callsFile, 'utf8').split('\n').filter(Boolean).map((one) => JSON.parse(one))
     },
+    // 每次调用看到的 env（只记键名与本体的数据目录，令牌的值一个字都不落盘）。
+    envs() {
+      if (!fs.existsSync(envFile)) return []
+      return fs.readFileSync(envFile, 'utf8').split('\n').filter(Boolean).map((one) => JSON.parse(one))
+    },
     resetCalls() {
       fs.writeFileSync(callsFile, '', 'utf8')
+      fs.writeFileSync(envFile, '', 'utf8')
     },
   }
   api.set(scenario)

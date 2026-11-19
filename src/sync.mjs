@@ -21,15 +21,39 @@ function firstLine(text) {
   return lines.length === 0 ? '' : lines[0]
 }
 
+// 递给本体的 env 要筛：语雀令牌只在这一个进程里用，本体不需要凭据，凭据不该离开本进程；
+// 插件自己的 AGENT_MAN_YUQUE_* 对本体的配置表来说是"不认识的键"，它每次都会刷一行
+// 「环境变量 … 不对应任何配置键」的警告（噪声，还把插件的内部变量名抖出去）。
+// 本体自己要的一律留着（AGENT_MAN_HOME、PATH、ComSpec、SystemRoot、PATHEXT …）：Windows 上少一个就起不来。
+const HOST_ENV_HIDDEN = /^(?:YUQUE_TOKEN|AGENT_MAN_YUQUE_)/i
+
+export function envForHost(env) {
+  const out = {}
+  for (const key of Object.keys(env ?? {})) {
+    if (HOST_ENV_HIDDEN.test(key)) continue
+    out[key] = env[key]
+  }
+  return out
+}
+
+// Windows 上 .cmd/.bat 只能靠 cmd.exe 跑；路径里常有空格（Program Files），得自己加引号，
+// 否则拼出来的命令行第一段就被截断了（实测：不加引号会报 "'…\probe' is not recognized"）。
+function quoted(text) {
+  return /[\s"]/.test(text) ? `"${text}"` : text
+}
+
 // 调本体：一条命令一个进程，stdout 只当数据用。
 // 退出码契约要分清三件事：本体超时（timeout / 被杀）是 75（超时，不是缺失），
 // 本体找不到是 69（依赖缺失），本体自己说不（非 0 且 stderr 有原文）也是 69，但要把原文带上。
 export function runAgentMan(bin, args, options = {}) {
-  const env = options.env ?? process.env
+  const env = envForHost(options.env ?? process.env)
   const timeoutMs = options.timeoutMs ?? RUN_TIMEOUT_MS
   const bulk = [...bin.prefix, ...args]
   const useShell = process.platform === 'win32' && /\.(cmd|bat)$/i.test(bin.cmd)
-  const res = spawnSync(bin.cmd, bulk, {
+  // 走 shell 时整条命令行自己拼成一个参数、args 传空数组：Node 24 对
+  // 「shell: true 还带 args」会打 DEP0190 弃用警告，而我们本来就不需要它的拼接。
+  const res = spawnSync(useShell ? [bin.cmd, ...bulk].map((one) => quoted(one)).join(' ') : bin.cmd,
+    useShell ? [] : bulk, {
     encoding: 'utf8',
     timeout: timeoutMs,
     env,

@@ -106,6 +106,53 @@ test('调本体四份取数一律带 --json，少一个就拿不到数据', asyn
   for (const one of calls) assert.equal(one[2], '--json', `${one[0]} ${one[1]} 少了 --json`)
 })
 
+test('调本体只带筛过的 env：令牌不出本进程，插件自己的变量也不透给本体', async () => {
+  const dataHome = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-man-home-'))
+  STRAY.push(dataHome)
+  // AGENT_MAN_YUQUE_TOC 也给上：插件自己的开关同样不许进本体。
+  const h = await harness({ env: { AGENT_MAN_HOME: dataHome, AGENT_MAN_YUQUE_TOC: 'off' } })
+  assert.equal(h.env.YUQUE_TOKEN, MOCK_TOKEN, '前提：插件自己手里是有令牌的')
+  const r = await h.run(['status'])
+  assert.equal(r.code, 0, r.err)
+  const seen = h.agent.envs()
+  assert.equal(seen.length, 4, '四份取数，每回都该记一笔')
+  for (const one of seen) {
+    assert.ok(!one.keys.includes('YUQUE_TOKEN'), `${one.argv.join(' ')} 看到了令牌`)
+    const leaked = one.keys.filter((key) => /^AGENT_MAN_YUQUE_/i.test(key))
+    assert.deepEqual(leaked, [], `${one.argv.join(' ')} 看到了插件变量`)
+    assert.ok(one.keys.includes('AGENT_MAN_HOME'), '本体的数据目录要留着')
+    assert.equal(one.home, dataHome, 'AGENT_MAN_HOME 要原样递过去，本体靠它找数据')
+  }
+  // 假本体照真本体的脾气：env 里有看不懂的 AGENT_MAN_* 就刷一行警告。这行不该出现在输出里。
+  assert.ok(!r.err.includes('不对应任何配置键'), r.err)
+  assert.ok(!r.out.includes('不对应任何配置键'), r.out)
+})
+
+test('AGENT_MAN_BIN 指到 .cmd 垫片也能跑：路径带空格也一样（真机装在 Program Files 下）',
+  { skip: process.platform !== 'win32' }, async () => {
+    const h = await harness({
+      env: {
+        PATH: process.env.PATH,
+        ComSpec: process.env.ComSpec,
+        SystemRoot: process.env.SystemRoot,
+        PATHEXT: process.env.PATHEXT,
+      },
+    })
+    // 目录名故意带空格：不加引号时 cmd.exe 会把路径截断在第一段（实测会报 not recognized）。
+    const shimDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-man shim-'))
+    STRAY.push(shimDir)
+    const shim = path.join(shimDir, 'agent-man.cmd')
+    fs.writeFileSync(shim, `@echo off\n"${process.execPath}" "${h.agent.script}" %*\n`, 'utf8')
+    h.env.AGENT_MAN_BIN = shim
+    const r = await h.run(['status'])
+    assert.equal(r.code, 0, r.err)
+    // 第一行是抬头（库名 + 数据目录），「上次同步」在第二行（前面两个空格）。
+    assert.equal(r.lines[1], '  上次同步  还没同步过', r.out)
+    const calls = h.agent.calls()
+    assert.equal(calls.length, 4, '垫片要把四份取数原样转给假本体')
+    assert.deepEqual(calls[0], ['context', 'show', '--json'])
+  })
+
 test('首次 sync：新建两篇后各挂一次树，且绝不整棵替换 toc', async () => {
   const h = await harness()
   const r = await h.run(['sync'])
