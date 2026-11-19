@@ -21,6 +21,13 @@
 **不许**直接读 `~/.agent-man` 下的文件：那是第二真源，形状随时会变，绕过 CLI 等于把插件焊死在
 内部实现上。
 
+递给本体的 env 要筛（`src/sync.mjs` 的 `envForHost`）：`YUQUE_TOKEN` 与插件的 `AGENT_MAN_YUQUE_*`
+一律不递——本体不需要凭据，凭据不该离开本进程；它还会为看不懂的 `AGENT_MAN_*` 键刷「不对应任何
+配置键」的警告。反过来 `AGENT_MAN_HOME`、`PATH`、`ComSpec`、`SystemRoot`、`PATHEXT` 一个都不能少，
+Windows 上少一个就起不来。`.cmd` / `.bat` 靠 `cmd.exe` 跑，拼命令行时路径要自己加引号
+（安装路径常带空格），且整条命令行当**一个**参数传、args 传空数组——Node 24 对
+「`shell: true` 还带 args」会打 DEP0190。
+
 ## 语雀接口的事实来源
 
 `docs/yuque-api-facts.md`（实测记录，只搬事实、不含任何 uid/令牌）。要改 `src/api.mjs` 先核这一份：
