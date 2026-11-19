@@ -106,12 +106,14 @@ export function createApi(options) {
     },
 
     // 创建：POST 之后语雀不会自动把它挂进目录树，toc 要另外写（见 putToc）。
+    // `public: 0` 显式写死（facts.md §6/§10-1）：不把「这篇可能公开」交给库的默认值去决定。
     async createDoc(payload) {
       const res = await call('POST', `/repos/${nsPath}/docs`, {
         title: payload.title,
         slug: payload.slug,
         format: 'markdown',
         body: payload.body,
+        public: 0,
       })
       if (res.status !== 200 && res.status !== 201) {
         throw statusError(res.status, res.data, `新建文档 ${payload.slug}`)

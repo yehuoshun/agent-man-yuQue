@@ -38,6 +38,10 @@ process.stderr.write('! 假 agent-man 不认识 ' + argv.join(' ') + '\\n')
 process.exit(64)
 `
 
+// 剧本里的时刻写成 Date.parse 而不是裸毫秒：13 位毫秒数以 1 开头，隐私扫描会当成手机号。
+export const FAKE_AT = Date.parse('2026-11-19T16:19:52.643Z')
+export const FAKE_UPDATED_AT = Date.parse('2026-11-19T16:19:52.799Z')
+
 export const SCENARIO_DEFAULT = {
   context: 'agent-man · 2026-11-20 00:16\n\n建议\n  夜深了，不主动说\n',
   memory: {
@@ -47,7 +51,7 @@ export const SCENARIO_DEFAULT = {
         key: '她怕冷',
         fact: '空调从来不调 22 度以下',
         imp: 3,
-        at: 1795105192643,
+        at: FAKE_AT,
         evidence: { ids: ['e-1', 'e-2'] },
       },
     ],
@@ -61,7 +65,7 @@ export const SCENARIO_DEFAULT = {
     items: [
       {
         id: 'r-1',
-        at: 1795105192643,
+        at: FAKE_AT,
         text: '夜里十一点后不提工作',
         why: '昨天 23:40 提加班，她只回了个嗯',
         supersedes: [],
@@ -78,7 +82,7 @@ export const SCENARIO_DEFAULT = {
   self: {
     text: '## 2026-11-19\n我是她的搭子，不是她的老板。\n',
     cost: 18,
-    updatedAt: 1795105192799,
+    updatedAt: FAKE_UPDATED_AT,
     limit: 600,
     over: false,
   },
