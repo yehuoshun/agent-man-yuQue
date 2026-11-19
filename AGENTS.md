@@ -11,7 +11,8 @@
 - 具名 `export function`；跨目录（`bin/`、`test/`）只 import `src/index.mjs` 门面，
   不直接摸 `src/` 里的零件。
 - 目录：`bin/`（薄壳，只接退出码）、`src/`（`main` 分派 + `describe` / `config` / `api` /
-  `render` / `sync` / `state` + `index` 门面）、`test/`（一模块一个测试文件 + `helpers.mjs`）。
+  `render` / `sync` / `state` + `index` 门面）、`test/`（一模块一个测试文件 + `helpers.mjs`）、
+  `scripts/`（卫生自查）、`docs/`（接口事实）。
   `src/` 与 `test/` 根是平铺的模块表，不再往下分目录。
 
 ## 数据来源只许走本体 CLI
@@ -22,14 +23,20 @@
 
 ## 语雀接口的事实来源
 
-`tmp/probe-yuque/facts.md`（实探记录，含原响应）。要改 `src/api.mjs` 先核这一份：
+`docs/yuque-api-facts.md`（实测记录，只搬事实、不含任何 uid/令牌）。要改 `src/api.mjs` 先核这一份：
 
 - `GET /repos/{ns}/docs/{slug}`：200 存在、404 不存在；错误体是 `{status, message}`，**没有 `code`**
   → 一律按 HTTP status 分类，别去读 body。
 - 详情 `data.body` 是 Markdown 原文；`body_html` / `body_lake` / `body_draft` 绝不回写。
 - 新建带 `public: 0`（不让可见性继承默认值），更新**不碰** `public`（不改已有文档的可见性）。
-- 创建后文档不会自动进目录树，要 `PUT /repos/{ns}` 带 `toc`（全量替换）——
-  只追加自己两篇，不覆盖别人的节点；缺 `repo` 写权限时这一步 403，属**部分成功**。
+- 真实 `toc_yml` 是**内部 TOC**：节点是 `type: META` / `type: DOC` + `uuid` / `doc_id` / `level`；
+  `DOC` 节点的 `url` 是**裸 slug**（不是 `/ns/slug` 全路径）。
+- 挂树只走增量接口 `PUT /repos/{ns}/toc` + `{"action":"appendNode","action_mode":"sibling",
+  "type":"DOC","doc_ids":[<doc id>]}`；`doc_id` 取 `POST /repos/{ns}/docs` 回包的 `data.id`
+  或详情里的 `data.id`。**禁止**再用 `PUT /repos/{ns}` 带 `{toc}` 全量替换——会盖掉别人的内部目录。
+  判重按 `type: DOC` 节点的 `doc_id` 与裸 slug `url` 两个条件，已经挂上就一个请求都不发。
+- 挂树 401/403 才是「缺 repo 写权限」，属**部分成功**（正文成功、退 1、state 照落、下次只重试挂树）；
+  5xx / 网络 / 形状认不出要说那件事本身，别冤枉权限。
 - 限流是账号级共享，撞 429 停下报原文、不自动重试。
 
 改假语雀（`test/helpers.mjs`）时，回包形状必须照 facts 抄（`{meta, data}` 双层、`_serializer`、
@@ -42,7 +49,8 @@
 假服务听 `127.0.0.1:0` 取随机端口，不写死端口。
 
 关键约束（改动时别弄丢）：无参零请求零写盘、`--dry-run` 零写请求、同内容不重发、
-哈希只算正文稳定内核（不含时刻与页脚）、state.json 原子写、坏 state.json 当空状态不崩。
+哈希只算正文稳定内核（不含时刻、页脚与相对时间文案）、state.json 原子写、坏 state.json 当空状态不崩。
+卫生三条（行宽 / BOM / CRLF）用 `node scripts/check-style.mjs` 自查，提交前跑一遍。
 
 ## 凭据
 
