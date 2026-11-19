@@ -27,6 +27,7 @@
 - `GET /repos/{ns}/docs/{slug}`：200 存在、404 不存在；错误体是 `{status, message}`，**没有 `code`**
   → 一律按 HTTP status 分类，别去读 body。
 - 详情 `data.body` 是 Markdown 原文；`body_html` / `body_lake` / `body_draft` 绝不回写。
+- 新建带 `public: 0`（不让可见性继承默认值），更新**不碰** `public`（不改已有文档的可见性）。
 - 创建后文档不会自动进目录树，要 `PUT /repos/{ns}` 带 `toc`（全量替换）——
   只追加自己两篇，不覆盖别人的节点；缺 `repo` 写权限时这一步 403，属**部分成功**。
 - 限流是账号级共享，撞 429 停下报原文、不自动重试。
