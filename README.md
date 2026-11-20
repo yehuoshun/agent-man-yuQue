@@ -32,7 +32,7 @@ $ agent-man-yuQue --describe
 {"name":"yuQue","desc":"把处境与记忆同步到语雀","section":"同步","timeout_ms":5000,"side_effects":true}
 ```
 
-一行 JSON、五字段齐全（design.md §8）。`side_effects` 是 `true`：`sync` 会写语雀、
+一行 JSON、五字段齐全（本体 `code/agent-man/docs/design.md` §8）。`side_effects` 是 `true`：`sync` 会写语雀、
 会写本地 `state.json`。但这不代表无参模式有副作用——见下条。
 
 ### 2. 无参：只读一行
