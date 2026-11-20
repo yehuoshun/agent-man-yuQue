@@ -31,7 +31,7 @@ curl.exe -s -o NUL -w "%{http_code}`n" https://github.com/yehuoshun/agent-man-yu
 ## 3. 插件自己的单测与卫生
 
 ```powershell
-node --test                    # 期望 tests 54 / pass 54 / fail 0
+node --test                    # 期望 tests 55 / pass 55 / fail 0
 node scripts/check-style.mjs   # 期望三行 ok
 ```
 
@@ -61,6 +61,8 @@ node ..\agent-man\bin\agent-man.mjs context show
 ```
 
 期望输出里有一行 `· 语雀：…（yuQue）`，且整条命令**一两秒内**返回（修前是 5 秒超时截断）。
+**不应**再有 `! 环境变量 AGENT_MAN_YUQUE_HOME 不对应任何配置键` 那行——插件的 state 现在跟着
+本体数据目录走（`data/agent-man` → `data/agent-man-yuque`），不用再设那个变量了。
 
 再验开关：
 
@@ -84,9 +86,9 @@ node bin\agent-man-yuQue.mjs sync
 
 - **插件**：新建仓库并实现（零依赖、Node ≥ 20）。无参只读一行给本体屏用，`status` 本地状态，
   `sync` 单向推两篇文档。数据只走 `agent-man <cmd> --json`，不读本体数据目录。
-- **联调挖出的 15 个问题**全部修掉并有断言锁住，账本在
-  [docs/integration-findings.md](integration-findings.md)。其中三条是本体侧（自递归、零件开关
-  是死配置、未知 env 刷警告），其余在插件侧。
+- **联调挖出的 17 个问题**全部修掉并有断言锁住，账本在
+  [docs/integration-findings.md](integration-findings.md)。其中四条是本体侧（自递归、零件开关
+  是死配置、未知 env 刷警告、harness 落点），其余在插件侧。
 - **本体**：给零件子进程盖 `AGENT_MAN_PART_CALL=1` 切断「本体→零件→本体」环，`parts.inject`
   真正生效；文档里「默认 namespace 指向作者私密库」这句旧说法改掉了。
 
