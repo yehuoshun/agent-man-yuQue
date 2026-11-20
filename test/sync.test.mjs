@@ -333,7 +333,9 @@ test('缺令牌：依赖缺失（69），不发任何请求', async () => {
 })
 
 test('令牌无效 401：69 并说清怎么换令牌', async () => {
-  const h = await harness({ yuque: { token: 'other-token' } })
+  // 与仓库约定一致：凭据一律一眼可辨是假的（mock-token-*），别留 'other-token' 这种
+  // 分不清真假的字面量——隐私扫描在真仓库里认不出它。
+  const h = await harness({ yuque: { token: 'mock-token-other' } })
   const r = await h.run(['sync'])
   assert.equal(r.code, 69)
   assert.ok(r.err.includes('令牌无效或过期'), r.err)
