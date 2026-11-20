@@ -86,16 +86,19 @@ test('令牌：环境变量优先，--token-file 逐次读文件，缺了才判 
 })
 
 test('数据目录：显式变量优先；没给就落在本体数据目录旁边；再没就 ~/.agent-man-yuque', () => {
-  assert.equal(homeOf({ AGENT_MAN_YUQUE_HOME: HOME, AGENT_MAN_HOME: 'D:\\data\\agent-man' }), HOME,
+  // 本体数据目录拿本平台的绝对路径现拼：写死 'D:\data\agent-man' 只在 Windows 成立——
+  // POSIX 上 dirname 认不出反斜杠，会把数据目录算到当前工作目录底下去（CI 的 ubuntu 腿就红在这）。
+  const fakeBase = path.join(os.tmpdir(), 'fake-data')
+  const fakeAmHome = path.join(fakeBase, 'agent-man')
+  const fakeSibling = path.join(fakeBase, 'agent-man-yuque')
+  assert.equal(homeOf({ AGENT_MAN_YUQUE_HOME: HOME, AGENT_MAN_HOME: fakeAmHome }), HOME,
     '显式给了就照用')
-  assert.equal(homeOf({ AGENT_MAN_HOME: 'D:\\data\\agent-man' }),
-    path.join('D:\\data', 'agent-man-yuque'),
+  assert.equal(homeOf({ AGENT_MAN_HOME: fakeAmHome }), fakeSibling,
     '本体把数据放 data/<项目>/ 时，插件的数据跟着落在旁边的 data/agent-man-yuque，'
     + '省掉一个 AGENT_MAN_ 开头的变量（本体见到陌生前缀会刷警告）')
   assert.equal(homeOf({}), path.join(os.homedir(), '.agent-man-yuque'), '什么线索都没有时的老默认')
   // 空串当没设：Windows 上 `set X=` 会留个空串，不能让它把数据目录变成当前目录。
-  assert.equal(homeOf({ AGENT_MAN_YUQUE_HOME: '   ', AGENT_MAN_HOME: 'D:\\data\\agent-man' }),
-    path.join('D:\\data', 'agent-man-yuque'))
+  assert.equal(homeOf({ AGENT_MAN_YUQUE_HOME: '   ', AGENT_MAN_HOME: fakeAmHome }), fakeSibling)
 })
 
 test('找本体：AGENT_MAN_BIN 优先，其次 PATH，再次 AGENT_MAN_REPO，都没有才 69', () => {
