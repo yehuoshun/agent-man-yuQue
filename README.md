@@ -211,6 +211,10 @@ npm test                       # == node --test
 node scripts/check-style.mjs   # 行宽 ≤110 / UTF-8 无 BOM / 零 CRLF，有命中列 文件:行号 并退 1
 ```
 
+CI（[.github/workflows/ci.yml](.github/workflows/ci.yml)）跑的就是这两条
+（`node --test` + `check-style`）：ubuntu 与 windows × node 20/22/24 六条腿，
+外加一条 `TZ=America/New_York` 时区腿；零依赖，所以没有 install 步骤。
+
 用例用 `node:http` 起一个假语雀服务（形状照真实响应抄：`{meta,data}` 双层、`_serializer`、
 `format: markdown`、404 的 `{status,message}` 无 `code` 字段），再配一个按剧本吐 JSON 的假
 `agent-man` 可执行文件，全程不联网、不碰真语雀、只用假令牌 `mock-token-123`。
