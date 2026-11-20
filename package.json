@@ -2,10 +2,11 @@
   "name": "agent-man-yuque",
   "version": "0.1.0",
   "private": true,
+  "license": "Apache-2.0",
   "description": "把 agent-man 的处境与记忆反向同步到语雀文档",
   "type": "module",
   "engines": { "node": ">=20" },
   "bin": { "agent-man-yuQue": "./bin/agent-man-yuQue.mjs" },
   "scripts": { "test": "node --test", "integration": "node tools/integration.mjs" },
-  "files": ["bin/", "src/", "tools/", "README.md", "AGENTS.md"]
+  "files": ["bin/", "src/", "tools/", "README.md", "AGENTS.md", "LICENSE"]
 }
