@@ -55,6 +55,19 @@ $ agent-man-yuQue                       # 一次都没同步过
 所以它压在 ~30 cost 以内、只出一行，超了会被整条丢掉。因此这里**不**自己加 `· ` 前缀，
 也不折行——本体渲染时会补 `· …（yuQue）`。
 
+库名没配（`YUQUE_NAMESPACE` 没设、`state.json` 里也没记过上次写过哪个库）时，这一行只答一句话：
+
+```console
+$ agent-man-yuQue
+语雀：没设目标知识库（YUQUE_NAMESPACE）
+```
+
+退 **0**，不是 64：本体把零件的无参输出当「答话」，非 0 会被记进 failures 并带出 `! ` 噪声。
+缺**配置**退 0、缺**依赖**照旧 69（找不到 `agent-man` 是后端不在，不是"你不知道配哪个库"）；
+64 只留给真正要动世界的两个入口——`status` 与 `sync`，它们能让人去改配置。
+库名的三条规矩：`sync` 每次都要由 `YUQUE_NAMESPACE` 明说（写操作不许靠"上次往哪写"猜目标，
+缺了就 64）；`status` 与无参允许沿用 `state.json` 里记过的上次库名，两者都没有才报缺库。
+
 本体数据读不到（找不到 `agent-man`、或本体自己报错）→ stderr 一行 `! `，退 69。
 
 这一行也有代价，明码标价：判「一致 / 待推送」得按同一套哈希把两篇重算一遍，而两份数据来自
@@ -72,9 +85,9 @@ $ agent-man-yuQue                       # 一次都没同步过
 $ agent-man-yuQue status
 上次同步    2026-11-20 00:31（4h 前）
 处境        落后：内容变了
-  agent-man-situation  https://www.yuque.com/mock-user/mock-book/agent-man-situation
+  agent-man-situation  https://www.yuque.com/你的登录名/你的库短名/agent-man-situation
 记忆        一致：3h 前
-  agent-man-memory     https://www.yuque.com/mock-user/mock-book/agent-man-memory
+  agent-man-memory     https://www.yuque.com/你的登录名/你的库短名/agent-man-memory
 ```
 
 `status --json` 一行、不缩进，给机器读：
@@ -97,8 +110,8 @@ $ agent-man-yuQue sync --dry-run
 （--dry-run：一个语雀请求都没发）
 
 $ agent-man-yuQue sync
-已创建 处境 → https://www.yuque.com/mock-user/mock-book/agent-man-situation
-已创建 记忆 → https://www.yuque.com/mock-user/mock-book/agent-man-memory
+已创建 处境 → https://www.yuque.com/你的登录名/你的库短名/agent-man-situation
+已创建 记忆 → https://www.yuque.com/你的登录名/你的库短名/agent-man-memory
 
 $ agent-man-yuQue sync                    # 什么都没变：一个请求都不发
 没变，跳过 处境
@@ -135,7 +148,7 @@ $ agent-man-yuQue sync                    # 什么都没变：一个请求都不
 | --- | --- | --- |
 | `YUQUE_TOKEN` | — | 语雀令牌，**只有 `sync` 需要**。绝不落盘、绝不回显、不进仓库 |
 | `--token-file <路径>` | — | 用文件里的令牌代替 `YUQUE_TOKEN`（逐次读，不回显） |
-| `YUQUE_NAMESPACE` | `mock-user/mock-book` | 目标知识库，形如 `登录名/库短名` |
+| `YUQUE_NAMESPACE` | —（必填） | 目标知识库，形如 `登录名/库短名`。**没有内置默认值**：不给就退 64 |
 | `YUQUE_API_BASE` | `https://www.yuque.com/api/v2` | 只接受 `http(s)://`。本地假服务、代理、换域名都改这个 |
 | `YUQUE_TIMEOUT_MS` | `15000` | 单次请求超时，超了退 75 |
 | `AGENT_MAN_YUQUE_HOME` | `~/.agent-man-yuque` | 里面只有 `state.json` |
@@ -178,7 +191,7 @@ $ agent-man-yuQue sync                    # 什么都没变：一个请求都不
   `AGENT_MAN_YUQUE_TOC=off` 则整段跳过，连库都不查。
 - **不自动重试**：语雀限流是账号级共享额度（5000/小时），撞 429 就停下报原文，不连续轰炸。
 - **可见性**：新建时 `public: 0` 显式写死，不让「这篇会不会公开」交给库的默认值去决定；
-  更新时**不碰** `public`（不偷偷改已存在文档的可见性）。默认库本身是私密的。
+  更新时**不碰** `public`（不偷偷改已存在文档的可见性）。要不要往公开库写由你配，插件不替你决定。
   接口事实都记在 [docs/yuque-api-facts.md](docs/yuque-api-facts.md) 里。
 
 ## 测试
@@ -195,4 +208,4 @@ node scripts/check-style.mjs   # 行宽 ≤110 / UTF-8 无 BOM / 零 CRLF，有�
 ## 隐私
 
 令牌、cookie、真实姓名/邮箱一律不进仓库；测试里只有一眼可辨的假令牌。
-`state.json` 只记 slug / url / 哈希 / 时刻，不含正文。
+`state.json` 只记 slug / url / 哈希 / 时刻 / 库名，不含正文。
