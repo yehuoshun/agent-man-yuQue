@@ -27,16 +27,19 @@ node tools/integration.mjs --only=A,B,C2,F      # 只跑选中组/断言，改�
 
 ## 一次全量跑出什么
 
-32 条，按组：A 4（契约形状）· B 5（无参模式）· C 2（数据只走本体 CLI）· D 12（upsert / 幂等 /
-目录树 / 退出码）· E 6（真本体 + 真插件，含注入通道自递归、哨兵、`sense` deadline）· F 3（隐私与
-仓库卫生）。另有 LIVE 一条恒 SKIP（要真令牌，得人工指一个专用测试库）。
+33 条，按组：A 4（契约形状）· B 5（无参模式）· C 2（数据只走本体 CLI）· D 12（upsert / 幂等 /
+目录树 / 退出码）· E 6（真本体 + 真插件，含注入通道自递归、哨兵、`sense` deadline）· F 4（隐私与
+仓库卫生，含 F4 临时目录落点）。另有 LIVE 一条恒 SKIP（要真令牌，得人工指一个专用测试库）。
 
 **同一台机上别并发跑两份**：每条断言的临时目录是 `mkdtempSync` 出来的（每进程唯一），两份不会
 互相踩文件；但两边会同时起一串本体子进程，D3-R / D9-R 这类靠时间量的断言在 CPU 争抢下会假红
 （早期版本更糟：目录写死成 `.run`，并发时一方 `freshDir()` 会把另一方的 `state.json` 删掉）。
 跑之前先确认没有另一个 `integration.mjs` 在跑。
 
+临时目录落在**插件仓库自己的 `tmp/`** 下（`tmp/int-<pid>-XXXX`，已被 `.gitignore` 覆盖），
+不进系统临时目录；`finally` 与 exit 钩子各删一次，跑完 `git status` 仍是干净的。
+
 ## 它保证不碰什么
 
 不碰真语雀、不用真令牌（只用 `test-token-not-real`）、不碰 `~/.agent-man`（每个子进程都显式给
-`AGENT_MAN_HOME` / `AGENT_MAN_YUQUE_HOME`）、不改两个仓库的任何文件，临时目录全部 `mkdtemp` 后 `finally` 删。
+`AGENT_MAN_HOME` / `AGENT_MAN_YUQUE_HOME`）、不改两个仓库的任何文件，临时目录 `mkdtemp` 后 `finally` 删。

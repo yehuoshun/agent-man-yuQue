@@ -123,3 +123,21 @@ weakest 按 retention 排序选，时间推移可能换人 → 会触发一次�
 外层 `AGENT_MAN_REPO` 透进该分支后，「本体找不到」这条跑不到空 PATH 上去。
 
 - 修：该分支显式清掉透传的 `AGENT_MAN_REPO` / `AGENT_MAN_BIN`。
+
+## F-16 联调临时目录曾建在系统临时目录（轻，已修，交付物侧）
+
+入库版 `tools/integration.mjs` 用 `fs.mkdtempSync(path.join(os.tmpdir(), 'agent-man-yuque-int-'))`，
+落在 `%TEMP%` 下。异常退出（Ctrl-C、被信号打断且 exit 钩子没跑）会在系统临时目录里留一坨假家目录
+与假零件；工作区约定也明确「临时文件一律写 `tmp/`，不用系统临时目录」。
+
+- 修：改成建在**插件仓库自己的 `tmp/`** 下——`tmp/` 已被 `.gitignore` 覆盖（既不进系统临时目录，
+  也不污染仓库可见树），名字再带 pid + 随机后缀，同机两份并发仍互不相干（同类教训见 F-14/F-15）。
+  仓库内固定目录 `tmp/` 本身不算「写死」：跑不跑都不改 git 可见文件，`git status` 始终干净。
+- **没跟着改的**：`test/*.test.mjs` 与本体 `test/*.test.mjs` 仍用 `mkdtemp(os.tmpdir())`。理由：那些
+  是既有约定（两仓共 26 个用例文件），每个都在 `finally` 里必删、只活几秒；要改成仓库 `tmp/`
+  得在每个文件里额外清理父目录，收益低于风险。长期交付物（这份 harness）才按工作区约定落仓库内。
+- 复跑（`F4` 断言已把这两条锁住：`RUN` 必须在 `tmp/` 内、且不在系统临时目录；顺手报上轮残留数）：
+  ```powershell
+  Get-ChildItem $env:TEMP -Filter 'agent-man-yuque-int-*' -Force -Directory
+  Get-ChildItem .\tmp -Filter 'int-*' -Force -Directory      # 跑完后应为空
+  ```

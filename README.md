@@ -211,7 +211,7 @@ node scripts/check-style.mjs   # 行宽 ≤110 / UTF-8 无 BOM / 零 CRLF，有�
 
 ```powershell
 $env:AGENT_MAN_REPO = '<本体仓库根，含 bin/agent-man.mjs>'   # 或把本体放在兄弟目录 ../agent-man
-node tools/integration.mjs                                   # 32 条，约 2 分钟
+node tools/integration.mjs                                   # 33 条，约 2 分钟
 ```
 
 它起**真本体 CLI**、**假语雀**（`127.0.0.1:0`）、**真插件**，验 `--describe` 契约、无参模式零请求

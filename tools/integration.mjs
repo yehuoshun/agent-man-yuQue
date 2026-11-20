@@ -4,12 +4,12 @@
 //
 // 纪律：不碰真语雀（假服务只 listen 127.0.0.1:0）、不用真令牌（test-token-not-real）、
 // 不读写 ~/.agent-man 与 ~/.agent-man-yuque（每个子进程都显式给 AGENT_MAN_HOME /
-// AGENT_MAN_YUQUE_HOME）、不修改两个仓库里的任何文件（只读；临时目录一律 mkdtemp 建在
-// 系统临时目录下，跑完 finally 里整个删掉）。
+// AGENT_MAN_YUQUE_HOME）、不修改两个仓库里的任何文件（只读；临时目录建在插件仓库自己的
+// tmp/ 下——已被 .gitignore 覆盖，不进系统临时目录，跑完 finally 里整个删掉）。
 import { spawn, spawnSync } from 'node:child_process'
 import fs from 'node:fs'
 import http from 'node:http'
-import os from 'node:os'
+import os from 'node:os'          // 只给 F4 用：证明临时目录不在系统临时目录里
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { setTimeout as sleep } from 'node:timers/promises'
@@ -33,8 +33,12 @@ const AM = (() => {
 })()
 const AM_BIN = path.join(AM, 'bin', 'agent-man.mjs')
 const YQ_BIN = path.join(YQ, 'bin', 'agent-man-yuQue.mjs')
-// 全部临时产物（假零件、假家目录、记录器日志）都生在这一个 mkdtemp 目录里，跑完全删。
-const RUN = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-man-yuque-int-'))
+// 全部临时产物（假零件、假家目录、记录器日志）都生在这一个目录里，跑完全删。
+// 落点选插件仓库自己的 tmp/（.gitignore 已覆盖）：不进系统临时目录（工作区约定），
+// 也不污染仓库可见树；名字带 pid + 随机后缀，同机两份并发互不相干。
+const RUN_TRUNK = path.join(YQ, 'tmp')
+fs.mkdirSync(RUN_TRUNK, { recursive: true })
+const RUN = fs.mkdtempSync(path.join(RUN_TRUNK, `int-${process.pid}-`))
 
 const NODE = process.execPath
 const FAKE_TOKEN = 'test-token-not-real'
@@ -1231,6 +1235,22 @@ async function main() {
     if (problems.length > 0) throw new Fail(problems.join('；'))
     return `private=true type=module engines=${eng} 依赖 0 个；bin=${JSON.stringify(bin)} 目标存在`
   })
+
+  await check('F4', 'harness 的临时目录在仓库 tmp/ 内、不落系统临时目录（工作区约定）',
+    async () => {
+      const trunk = path.resolve(YQ, 'tmp')
+      const rel = path.relative(trunk, RUN)
+      if (rel === '' || rel.startsWith('..') || path.isAbsolute(rel)) {
+        throw new Fail(`临时目录不在仓库 tmp/ 内：RUN=${RUN}，期望在 ${trunk} 下`)
+      }
+      const inSysTmp = path.resolve(RUN).startsWith(path.resolve(os.tmpdir()))
+      if (inSysTmp) throw new Fail(`临时目录落在系统临时目录：RUN=${RUN}`)
+      // 跑到这里时上一轮的残留应当已被 finally 清掉；有残留说明退出钩子漏了（不判定为失败，只报数）
+      const leftovers = fs.existsSync(trunk)
+        ? fs.readdirSync(trunk).filter((one) => one.startsWith('int-') && path.join(trunk, one) !== RUN)
+        : []
+      return `RUN=${path.relative(YQ, RUN)}；不在系统临时目录；tmp/ 里上轮残留 ${leftovers.length} 个`
+    })
 
   // ── 收尾 ──
   await stopFake()

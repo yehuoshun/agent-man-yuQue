@@ -49,7 +49,7 @@ npm --prefix ..\agent-man test
 node tools/integration.mjs
 ```
 
-期望 `PASS 32 / SKIP 1 / FAIL 0`，退出码 0。约两分钟，中间有一条要等跨整分钟。
+期望 `PASS 33 / SKIP 1 / FAIL 0`，退出码 0。约两分钟，中间有一条要等跨整分钟。
 
 `SKIP 1` 是 `LIVE` 那条（要真令牌），没配令牌时恒跳过，不算失败。
 每条断言验什么、失败怎么读，见 [tools/README.md](../tools/README.md)。
