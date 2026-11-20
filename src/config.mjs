@@ -4,8 +4,13 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 
-// 默认库按用户指定钉死 mock-book（详见 docs/yuque-api-facts.md：它是私密库、public:0、空库）。
-export const DEFAULT_NAMESPACE = 'mock-user/mock-book'
+// 没有内置默认库：写死在代码里就是把某个真实账号名钉进公开仓库，还会让"忘了配"变成"往一个
+// 你并不想写的地方发请求"。目标库只有两条来路：显式给 YUQUE_NAMESPACE，或沿用 state.json 里
+// 记过的上次那个库（只给 status 与无参用：sync 是写操作，目标必须每次都说清）。
+export const DEFAULT_NAMESPACE = ''
+export const MISSING_NAMESPACE = '没设目标知识库：用 YUQUE_NAMESPACE 指定，形如 登录名/库短名'
+// 无参只说一行、不退回 64：本体把零件的无参输出当"答话"，非 0 会被记成插件失败。
+export const NO_NAMESPACE_LINE = '语雀：没设目标知识库（YUQUE_NAMESPACE）'
 // 基址可覆盖是硬要求：本地假服务、代理、将来换域名都只改环境变量。
 export const DEFAULT_BASE = 'https://www.yuque.com/api/v2'
 export const DEFAULT_TIMEOUT_MS = 15000
@@ -32,9 +37,11 @@ export const DOC_SPECS = [
 
 // 退出码只有四种（design §8）：0 成功 · 64 参数错 · 69 依赖缺失 · 75 超时；其余算 1。
 // 用带 exitCode 的普通 Error，是为了让 main 一处收口，不必到处 process.exit。
-export function fail(exitCode, message) {
+// kind 是给调用方的判别标记（例如"缺库"要换一句人话），不进 stderr 文案。
+export function fail(exitCode, message, kind = null) {
   const e = new Error(message)
   e.exitCode = exitCode
+  if (kind !== null) e.kind = kind
   return e
 }
 
@@ -73,6 +80,12 @@ function readTokenFile(file) {
   return token
 }
 
+// state.json 和自己的数据目录只由环境变量决定，与目标库无关：没设库时也要能先读出
+// state.json（里面记着上次跑过的库），所以这一步单独拎出来，别让它跟着 namespace 一起失败。
+export function homeOf(env = process.env) {
+  return pick(env.AGENT_MAN_YUQUE_HOME, path.join(os.homedir(), '.agent-man-yuque'))
+}
+
 // 返回一份解析好的配置；任何"参数错"在这里就以 64 抛出去，不留给后面猜。
 export function resolveConfig(env = process.env, opts = {}) {
   const base = pick(env.YUQUE_API_BASE, DEFAULT_BASE).replace(/\/+$/, '')
@@ -80,10 +93,12 @@ export function resolveConfig(env = process.env, opts = {}) {
     throw fail(64, `YUQUE_API_BASE 只认 http:// 或 https:// 开头，拿到「${base}」`)
   }
 
-  const namespace = pick(env.YUQUE_NAMESPACE, DEFAULT_NAMESPACE)
+  // 优先级：环境变量 > 调用方给的"上次跑过的库"（opts.namespace，来自 state.json）> 报错。
+  const namespace = pick(env.YUQUE_NAMESPACE, pick(opts.namespace, DEFAULT_NAMESPACE))
+  if (namespace === '') throw fail(64, MISSING_NAMESPACE, 'no-namespace')
   const parts = checkNamespace(namespace)
 
-  const home = pick(env.AGENT_MAN_YUQUE_HOME, path.join(os.homedir(), '.agent-man-yuque'))
+  const home = homeOf(env)
   const tokenFile = pick(opts.tokenFile, '')
   const token = tokenFile === '' ? pick(env.YUQUE_TOKEN, '') : readTokenFile(tokenFile)
 

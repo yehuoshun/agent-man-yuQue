@@ -1,4 +1,6 @@
-// state.json 只记"我们写过什么"：每篇文档的 slug / url / 内容哈希 / 同步时刻。
+// state.json 只记"我们写过什么"：每篇文档的 slug / url / 内容哈希 / 同步时刻，
+// 外加一条 namespace——它是"上次真的往哪个库写过"的凭据，status 与无参靠它沿用，
+// 免得没设 YUQUE_NAMESPACE 时只能报错（sync 不靠它：写操作的目标每次都得明说）。
 // 写盘必须原子（tmp → fsync → rename）：半份 state 会让下次同步以为内容没变而跳过。
 import fs from 'node:fs'
 import path from 'node:path'
@@ -9,7 +11,7 @@ export function hashOf(text) {
 }
 
 export function emptyState() {
-  return { docs: {}, lastAt: null, tocAt: null, tocPending: false }
+  return { docs: {}, lastAt: null, tocAt: null, tocPending: false, namespace: null }
 }
 
 export function statePath(home) {
@@ -55,6 +57,8 @@ export function loadState(home, warn = () => {}) {
     // 目录树是另一次写，必须单独记账：正文成功、树没挂上时下次只补树、不重发正文。
     tocAt: typeof doc.tocAt === 'string' ? doc.tocAt : null,
     tocPending: doc.tocPending === true,
+    // 老 state.json 没有这一条（那时库名钉在代码里）：读成 null，交给上层决定要不要报错。
+    namespace: typeof doc.namespace === 'string' && doc.namespace !== '' ? doc.namespace : null,
   }
 }
 

@@ -9,15 +9,20 @@ import { DEFAULT_NAMESPACE, findOnPath, requireToken, resolveAgentMan, resolveCo
 import { clearDir, closeAllFakes } from './helpers.mjs'
 
 const HOME = path.join(os.tmpdir(), 'agent-man-yuque-cfg')
-const ENV = { YUQUE_TOKEN: 'mock-token-123', AGENT_MAN_YUQUE_HOME: HOME }
+// 假库名要显式给：产品没有默认库（钉一个真库名进公开仓库既泄露，也会让人忘配）。
+const NS = 'mock-user/mock-repo'
+const ENV = { YUQUE_TOKEN: 'mock-token-123', AGENT_MAN_YUQUE_HOME: HOME, YUQUE_NAMESPACE: NS }
 
 // 这个文件不启假服务，但兜底关一次：以后有人往这里加真请求的用例，句柄也不会漏。
 test.after(closeAllFakes)
 
-test('默认值照产品语义：库 mock-book、基址 api/v2、家目录 .agent-man-yuque', () => {
+test('产品没有默认库：不给 YUQUE_NAMESPACE 就 64，其余默认值照旧', () => {
+  assert.equal(DEFAULT_NAMESPACE, '', '公开仓库里不许钉任何真实库名')
+  // 缺库是"配置缺"，必须 64 并且说清怎么补；不许静默退回某个占位符去发请求。
+  assert.throws(() => resolveConfig({ ...ENV, YUQUE_NAMESPACE: '' }, {}),
+    (e) => e.exitCode === 64 && e.kind === 'no-namespace' && e.message.includes('YUQUE_NAMESPACE'))
   const cfg = resolveConfig({ ...ENV }, {})
-  assert.equal(cfg.namespace, DEFAULT_NAMESPACE)
-  assert.equal(cfg.namespace, 'mock-user/mock-book')
+  assert.equal(cfg.namespace, NS)
   assert.equal(cfg.base, 'https://www.yuque.com/api/v2')
   assert.equal(cfg.docs.length, 2)
   assert.deepEqual(cfg.docs.map((one) => one.slug), ['agent-man-situation', 'agent-man-memory'])
@@ -35,7 +40,7 @@ test('基址只认 http:// 或 https://，别的一律 64（不许静默退回�
 })
 
 test('命名空间要「登录名/库slug」两段，写成一段或三段都是 64', () => {
-  for (const bad of ['mock-book', 'a/b/c', '/mock-book', 'ye huoshun/mock-book']) {
+  for (const bad of ['onlyone', 'a/b/c', '/b', 'mock user/repo']) {
     assert.throws(() => resolveConfig({ ...ENV, YUQUE_NAMESPACE: bad }, {}), (e) => e.exitCode === 64)
   }
   assert.equal(resolveConfig({ ...ENV, YUQUE_NAMESPACE: 'someone/lib_1' }, {}).nsParts.length, 2)
