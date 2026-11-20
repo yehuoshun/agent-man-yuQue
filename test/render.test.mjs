@@ -37,9 +37,12 @@ function memory(patch = {}, stamp = STAMP) {
 }
 
 test('处境正文：五块都在，抬头写清此刻、静默与积压', () => {
-  const { body } = situation(sceneOf())
+  const scene = sceneOf()
+  const { body } = situation(scene)
   assert.ok(body.includes('## 此刻'), '要有此刻这一段')
-  assert.ok(body.includes('- 此刻：2026-11-20 00:31'), '此刻是绝对时刻，不是"刚刚"')
+  // 钟点由处境自己给（假本体按本机时区算）：写死 "00:31" 只在东八区成立，而 CI 跑在 UTC 与纽约。
+  assert.ok(body.includes(`- 此刻：${scene.clock}`), '此刻要照绝对钟点上屏，不是"刚刚"')
+  assert.match(scene.clock, /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/, '此刻得是绝对时刻的形态')
   assert.ok(body.includes('夜深了'), '静默时段要说人话')
   assert.ok(body.includes('上次开口：3 小时前（之后 2 条新记忆）'), '上次开口要带相对文案')
   assert.ok(body.includes('积压：2 条待巩固'), '积压要上屏')
