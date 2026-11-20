@@ -69,3 +69,6 @@ Windows 上少一个就起不来。`.cmd` / `.bat` 靠 `cmd.exe` 跑，拼命令
 分支先行（`feat/`、`fix/`、`docs/`…），一改一提交一 push；提交信息中文
 `范围: 改了什么(为什么)`，范围取 `cli` / `plugin` / `api` / `render` / `sync` / `state` / `docs` / `test`。
 不 `git add -A`，不 `reset --hard` / `checkout -- .` / `clean -fd` / `push --force`。
+
+**平行代理共存时**：动手前先 `git status`。发现不是自己刚做的改动，先逐条核实内容是否与本任务
+一致——一致就沿用（回滚等于把别人已验证的活扔了），不一致就停下问，别整文件覆盖。
