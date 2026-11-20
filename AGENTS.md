@@ -62,7 +62,7 @@ Windows 上少一个就起不来。`.cmd` / `.bat` 靠 `cmd.exe` 跑，拼命令
 ## 凭据
 
 令牌只从 `YUQUE_TOKEN` 或 `--token-file` 读，不落盘、不回显、不写进日志与提交信息。
-测试只用一眼假的 `mock-token-123`。`state.json` 只记 slug / url / 哈希 / 时刻，不含正文。
+测试只用一眼假的 `mock-token-123`。`state.json` 只记 slug / url / 哈希 / 时刻 / 库名，不含正文。
 
 ## Git
 
