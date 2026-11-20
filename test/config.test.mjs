@@ -5,7 +5,8 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { DEFAULT_NAMESPACE, findOnPath, requireToken, resolveAgentMan, resolveConfig } from '../src/index.mjs'
+import { DEFAULT_NAMESPACE, findOnPath, homeOf, requireToken, resolveAgentMan, resolveConfig }
+  from '../src/index.mjs'
 import { clearDir, closeAllFakes } from './helpers.mjs'
 
 const HOME = path.join(os.tmpdir(), 'agent-man-yuque-cfg')
@@ -82,6 +83,19 @@ test('令牌：环境变量优先，--token-file 逐次读文件，缺了才判 
   } finally {
     clearDir(dir)
   }
+})
+
+test('数据目录：显式变量优先；没给就落在本体数据目录旁边；再没就 ~/.agent-man-yuque', () => {
+  assert.equal(homeOf({ AGENT_MAN_YUQUE_HOME: HOME, AGENT_MAN_HOME: 'D:\\data\\agent-man' }), HOME,
+    '显式给了就照用')
+  assert.equal(homeOf({ AGENT_MAN_HOME: 'D:\\data\\agent-man' }),
+    path.join('D:\\data', 'agent-man-yuque'),
+    '本体把数据放 data/<项目>/ 时，插件的数据跟着落在旁边的 data/agent-man-yuque，'
+    + '省掉一个 AGENT_MAN_ 开头的变量（本体见到陌生前缀会刷警告）')
+  assert.equal(homeOf({}), path.join(os.homedir(), '.agent-man-yuque'), '什么线索都没有时的老默认')
+  // 空串当没设：Windows 上 `set X=` 会留个空串，不能让它把数据目录变成当前目录。
+  assert.equal(homeOf({ AGENT_MAN_YUQUE_HOME: '   ', AGENT_MAN_HOME: 'D:\\data\\agent-man' }),
+    path.join('D:\\data', 'agent-man-yuque'))
 })
 
 test('找本体：AGENT_MAN_BIN 优先，其次 PATH，再次 AGENT_MAN_REPO，都没有才 69', () => {

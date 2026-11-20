@@ -82,8 +82,17 @@ function readTokenFile(file) {
 
 // state.json 和自己的数据目录只由环境变量决定，与目标库无关：没设库时也要能先读出
 // state.json（里面记着上次跑过的库），所以这一步单独拎出来，别让它跟着 namespace 一起失败。
+//
+// 优先级：AGENT_MAN_YUQUE_HOME（显式指定）→ 本体数据目录的同级 `agent-man-yuque/` → `~/.agent-man-yuque`。
+// 中间那条是为了「本体把数据放在 data/<项目>/」这类布局：插件的数据跟着落在旁边的
+// `data/agent-man-yuque/`，不必再让用户去设一个 `AGENT_MAN_` 开头的变量——那个前缀是本体的
+// 配置键命名空间，本体见到陌生名字会刷一行「不对应任何配置键」的警告（真机上每次开屏都见）。
 export function homeOf(env = process.env) {
-  return pick(env.AGENT_MAN_YUQUE_HOME, path.join(os.homedir(), '.agent-man-yuque'))
+  const explicit = pick(env.AGENT_MAN_YUQUE_HOME, '')
+  if (explicit !== '') return explicit
+  const amHome = pick(env.AGENT_MAN_HOME, '')
+  if (amHome !== '') return path.join(path.dirname(path.resolve(amHome)), 'agent-man-yuque')
+  return path.join(os.homedir(), '.agent-man-yuque')
 }
 
 // 返回一份解析好的配置；任何"参数错"在这里就以 64 抛出去，不留给后面猜。

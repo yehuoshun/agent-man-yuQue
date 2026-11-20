@@ -141,3 +141,22 @@ weakest 按 retention 排序选，时间推移可能换人 → 会触发一次�
   Get-ChildItem $env:TEMP -Filter 'agent-man-yuque-int-*' -Force -Directory
   Get-ChildItem .\tmp -Filter 'int-*' -Force -Directory      # 跑完后应为空
   ```
+
+## F-17 插件的数据目录变量撞上本体的配置键前缀（中，已修）
+
+真机上把插件的数据目录按工作区约定指到 `data/agent-man-yuque` 时，只能用
+`AGENT_MAN_YUQUE_HOME`——而这个前缀是本体的配置键命名空间。本体每次开屏都会多刷一行：
+
+```
+! 环境变量 AGENT_MAN_YUQUE_HOME 不对应任何配置键，已忽略（真实键见 agent-man config show --json）
+```
+
+（本体侧这条警告是**故意**留的护栏：`am:test/config.test.mjs:164` 有断言「认下入口提示没把整个
+前缀放开：陌生的 `AGENT_MAN_` 变量照旧报」。所以不能靠放宽带前缀来解决，只能插件侧避让。）
+
+- 修：`homeOf()` 改成三级回退——① 显式 `AGENT_MAN_YUQUE_HOME` ② **本体数据目录的同级**
+  `agent-man-yuque/`（`AGENT_MAN_HOME=<…>/data/agent-man` → `<…>/data/agent-man-yuque`）
+  ③ `~/.agent-man-yuque`。于是「数据放 `data/`」这条约定不必再靠设一个 `AGENT_MAN_*` 变量实现，
+  警告随之消失，而 state 的落点与原来**逐字节相同**（真机上仍读得到「与本体一致（19h 前）」）。
+- 断言：`test/config.test.mjs` 的「数据目录：显式变量优先；没给就落在本体数据目录旁边」；
+  实测清掉该用户级变量后 `agent-man context show` 再无那行 `!`，`（yuQue）` 行照常在。

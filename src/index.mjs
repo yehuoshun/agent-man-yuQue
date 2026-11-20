@@ -8,6 +8,7 @@ export {
   dataHomeOf,
   fail,
   findOnPath,
+  homeOf,
   requireToken,
   resolveAgentMan,
   resolveConfig,

@@ -151,7 +151,7 @@ $ agent-man-yuQue sync                    # 什么都没变：一个请求都不
 | `YUQUE_NAMESPACE` | —（必填） | 目标知识库，形如 `登录名/库短名`。**没有内置默认值**：不给就退 64 |
 | `YUQUE_API_BASE` | `https://www.yuque.com/api/v2` | 只接受 `http(s)://`。本地假服务、代理、换域名都改这个 |
 | `YUQUE_TIMEOUT_MS` | `15000` | 单次请求超时，超了退 75 |
-| `AGENT_MAN_YUQUE_HOME` | `~/.agent-man-yuque` | 里面只有 `state.json` |
+| `AGENT_MAN_YUQUE_HOME` | 见下 | 插件自己的数据目录，里面只有 `state.json`；**能不设就别设** |
 | `AGENT_MAN_YUQUE_TOC` | 开 | 设成 `off` 就不碰目录树 |
 | `AGENT_MAN_YUQUE_SITUATION_SLUG` / `…_TITLE` | 见上表 | 换 slug / 标题 |
 | `AGENT_MAN_YUQUE_MEMORY_SLUG` / `…_TITLE` | 见上表 | 同上 |
@@ -160,6 +160,14 @@ $ agent-man-yuQue sync                    # 什么都没变：一个请求都不
 
 数据来源**一律走本体的 CLI**（`agent-man <cmd> --json`），不直接读 `~/.agent-man` 下的文件——
 那是第二真源，形状随时会变，绕过 CLI 就是把插件焊死在内部实现上。
+
+**`AGENT_MAN_YUQUE_HOME` 能不设就别设**：`AGENT_MAN_` 是本体的配置键前缀，本体见到不认识的
+`AGENT_MAN_*` 会在**每次开屏**多刷一行「不对应任何配置键，已忽略」。不设时插件自己找地方：
+
+1. 设了 `AGENT_MAN_YUQUE_HOME` → 就用它；
+2. 否则看 `AGENT_MAN_HOME`：**落在它的同级** `agent-man-yuque/`
+   （`AGENT_MAN_HOME=<…>/data/agent-man` → `<…>/data/agent-man-yuque`，数据自然都在 `data/` 下）；
+3. 都没有 → `~/.agent-man-yuque`。
 
 ## 退出码
 
