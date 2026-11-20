@@ -14,7 +14,9 @@ git -C ..\agent-man log --oneline -1
 git -C . log --oneline -1
 ```
 
-期望 HEAD：本体 `18a5886`（`main` 与 `v1` 都指向它）、插件 `911a442`。两行都**不带** `ahead`。
+判据是**两行都不带 `ahead`**（本地与远端对齐），别硬比 hash——本仓库之后每加一次文档提交 hash 都会前进。
+本体这两个分支指同一个提交（`v1` 已 ff 进 `main`）；插件远端只有 `main` 一条。要对 hash 就比
+`git -C . rev-parse HEAD` 与 `git -C . ls-remote origin main` 的前 7 位。
 
 ## 2. 插件仓库是公开的，且没有隐私泄露
 
