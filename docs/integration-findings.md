@@ -160,3 +160,41 @@ weakest 按 retention 排序选，时间推移可能换人 → 会触发一次�
   警告随之消失，而 state 的落点与原来**逐字节相同**（真机上仍读得到「与本体一致（19h 前）」）。
 - 断言：`test/config.test.mjs` 的「数据目录：显式变量优先；没给就落在本体数据目录旁边」；
   实测清掉该用户级变量后 `agent-man context show` 再无那行 `!`，`（yuQue）` 行照常在。
+
+## F-18 这本账自己的 `文件:行号` 会漂（轻，只记录不追）
+
+账里的指针是写下那一刻的快照。测试文件后来长大了，指针就飘。本轮文档巡检按「引用必须点得到」
+复核了账内全部指针，三处已漂、落点如下（不改旧文，在此并存）：
+
+- F-3 写的「修：`src/sync.mjs:93`」——`:93` 现在是 `jsonOf()` 的 `catch`；四处取数带 `--json`
+  的真身在 `src/sync.mjs:128-131`（`collectSources` 里 `context show` / `memory ls` / `rule ls`
+  / `self show`）。
+- F-6 写的「`am:src/core/config.mjs:453` 的 known 集合」——`const known = new Set([DATA_HOME_ENV,
+  PART_CALL_ENV, ...PART_HINT_ENVS])` 现在在 `src/core/config.mjs:458`。
+- F-13 那句「可辨 mock 的凭据一共只许那 3 处」——F 组加了新假令牌后已变 5 处：
+  `test/config.test.mjs:15`、`test/helpers.mjs:9`、`test/sync.test.mjs:338`、
+  `tools/integration.mjs:44`、外加本文 `docs/integration-findings.md:107`（它引用了旧令牌名）。
+
+为什么数量变了却不会红：`F1` 的名单是**运行期数出来的**，`tools/integration.mjs:1196` 打的是
+「可辨 mock ${hits.length} 处：…」，数量本身不是断言，只有「出现不可辨的凭据」才是。
+
+- 教训：账本里写死「只许 N 处」这类数字，等于给自己埋一个迟早过期的断言——要么交给程序数，
+  要么只写「名单见 `F1` 报文的动态输出」。
+
+## F-18 本账本自己的 `文件:行号` 会漂（轻，已修，记录用）
+
+这本账里的指针是写下那一刻的快照。后续测试文件长大、源码挪块，指针就会指到别处——本次
+文档巡检把全部指针复核了一遍，确认已漂 3 处，逐条给出当前正确落点：
+
+- `F-3` 写的 `src/sync.mjs:93`：现在 `:93` 是 `jsonOf()` 的 `catch` 分支，四份 `--json`
+  取数实际在 `src/sync.mjs:128-131`（`collectSources()` 里那四行）。
+- `F-6` 写的 `am:src/core/config.mjs:453`：`const known = new Set([…])` 现在是
+  `am:src/core/config.mjs:458`。
+- `F-13` 写的「可辨 mock 的凭据一共只许那 3 处」：后来又添了 `tools/integration.mjs:44`
+  的 `test-token-not-real`，实际已是 5 处。
+
+- 修：指针不逐个追（追完还会漂），改为把「漂过」与正确落点记在这里。真正的防线是 `F1`
+  的名单由**运行期算出**（`tools/integration.mjs:1196` 打「可辨 mock N 处」），所以数量
+  变了不会让断言变红，只会让报文里的数字变。
+- 教训：账本里别写「只许 N 处」这种硬数字，它一定会过期。要么交给程序去数，要么写
+  「名单见 `F1` 报文的动态输出」。
