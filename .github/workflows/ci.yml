@@ -1,0 +1,84 @@
+name: ci
+
+# 零依赖，所以这里没有 npm install：拉下来直接跑用例。
+# 两条腿都要：Windows 上才出得来 CRLF / BOM / 反斜杠 / cmd.exe 垫片这几类事故；
+# Linux 腿反过来验生产代码里「只在 Windows 成立」的假设（sync.mjs 的 cmd.exe 分支、
+# config.mjs 的 WIN_SUFFIX 后缀表）没有漏到别的平台上去。
+# tools/integration.mjs 不在这儿：它要两份 checkout 并排、跑两分钟、起真子进程。
+on:
+  push:
+    branches: [main]
+    paths-ignore: ['**/*.md']
+  pull_request:
+    paths-ignore: ['**/*.md']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: test · ${{ matrix.os }} · node ${{ matrix.node }} ${{ matrix.tz || '' }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      # 七个组合逐条写出来，不用 os × node 两个维度：matrix 的 include 会合并到已匹配的
+      # 组合上，写成显式列表才不会悄悄少一条腿。
+      matrix:
+        include:
+          - os: ubuntu-latest
+            node: '20'
+          - os: ubuntu-latest
+            node: '22'
+          - os: ubuntu-latest
+            node: '24'
+          - os: windows-latest
+            node: '20'
+          - os: windows-latest
+            node: '22'
+          - os: windows-latest
+            node: '24'
+          # 第 7 条腿：西半球时区。用例里凡是「本地某天某点」的，只有离开东八区才看得出
+          # 有没有把钟点写死（render.test.mjs 就栽过：写死 00:31，UTC 下必红）。
+          - os: ubuntu-latest
+            node: '24'
+            tz: America/New_York
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+
+      # 卫生三条（行宽 / BOM / CRLF）也进 CI：Windows 腿的 checkout 是验 CRLF 的唯一机会，
+      # 这条同时把本文件自己也管住（check-style 会走全仓，含 .github/）。
+      - name: 卫生三条（行宽 / BOM / CRLF）
+        shell: bash
+        run: node scripts/check-style.mjs
+
+      - name: node --test
+        shell: bash
+        env:
+          TZ: ${{ matrix.tz || 'UTC' }}
+        run: |
+          set -o pipefail
+          node --test 2>&1 | tee node-test.log
+
+      # 红了才跑：把最后一段输出贴成注解。公开仓库里没登录也能看见红在哪，因为日志本身要鉴权。
+      - name: 失败时把输出贴成注解
+        if: failure()
+        shell: bash
+        run: |
+          node -e "
+          const fs = require('node:fs')
+          if (!fs.existsSync('node-test.log')) {
+            console.log('::error::检查没过，没有 node --test 日志可贴（看上面那一步）')
+            process.exit(0)
+          }
+          const t = fs.readFileSync('node-test.log', 'utf8')
+          const s = t.slice(-4000).replace(/%/g, '%25').replace(/\r/g, '').replace(/\n/g, '%0A')
+          console.log('::error::' + s)
+          "
