@@ -8,13 +8,13 @@
 ## 1. 两仓都在远端、没有领先未推的提交
 
 ```powershell
-git -C ..\agent-man status -sb                     # 期望 ## v1...origin/v1
+git -C ..\agent-man status -sb                     # 期望 ## main...origin/main
 git -C . status -sb                                # 期望 ## main...origin/main
 git -C ..\agent-man log --oneline -1
 git -C . log --oneline -1
 ```
 
-期望 HEAD：本体 `18a5886`（分支 `v1`）、插件 `fcb1d98`（分支 `main`）。两行都**不带** `ahead`。
+期望 HEAD：本体 `18a5886`（`main` 与 `v1` 都指向它）、插件 `911a442`。两行都**不带** `ahead`。
 
 ## 2. 插件仓库是公开的，且没有隐私泄露
 
