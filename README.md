@@ -221,6 +221,7 @@ node tools/integration.mjs                                   # 32 条，约 2 �
 
 联调踩过的坑记在 [docs/integration-findings.md](docs/integration-findings.md)：
 15 条 F 编号，每条都有根因、修法与锁它的断言，别把那些约束改回去。
+从头验一遍（七条命令，不含令牌）照 [docs/acceptance.md](docs/acceptance.md) 走。
 
 ## 隐私
 
