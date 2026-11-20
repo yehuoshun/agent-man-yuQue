@@ -6,6 +6,6 @@
   "type": "module",
   "engines": { "node": ">=20" },
   "bin": { "agent-man-yuQue": "./bin/agent-man-yuQue.mjs" },
-  "scripts": { "test": "node --test" },
-  "files": ["bin/", "src/", "README.md", "AGENTS.md"]
+  "scripts": { "test": "node --test", "integration": "node tools/integration.mjs" },
+  "files": ["bin/", "src/", "tools/", "README.md", "AGENTS.md"]
 }

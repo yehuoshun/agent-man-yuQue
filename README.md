@@ -205,6 +205,20 @@ node scripts/check-style.mjs   # 行宽 ≤110 / UTF-8 无 BOM / 零 CRLF，有�
 `format: markdown`、404 的 `{status,message}` 无 `code` 字段），再配一个按剧本吐 JSON 的假
 `agent-man` 可执行文件，全程不联网、不碰真语雀、只用假令牌 `mock-token-123`。
 
+### 联调（要两份 checkout 一起跑，不在 `npm test` 里）
+
+`npm test` 只测插件自己。要证明「插件放进本体里真的能跑」，跑 [tools/integration.mjs](tools/integration.mjs)：
+
+```powershell
+$env:AGENT_MAN_REPO = '<本体仓库根，含 bin/agent-man.mjs>'   # 或把本体放在兄弟目录 ../agent-man
+node tools/integration.mjs                                   # 32 条，约 2 分钟
+```
+
+它起**真本体 CLI**、**假语雀**（`127.0.0.1:0`）、**真插件**，验 `--describe` 契约、无参模式零请求
+零写盘、数据只走本体 CLI、upsert 与跨分钟幂等、目录树只增量挂、退出码 0/64/69/75、以及本体屏上
+真出现 `（yuQue）` 那一行。跑一趟两分钟，所以**不进 CI**；改了契约、无参那一行、调用形状或幂等
+逻辑再跑。红线与失败怎么读见 [tools/README.md](tools/README.md)。
+
 ## 隐私
 
 令牌、cookie、真实姓名/邮箱一律不进仓库；测试里只有一眼可辨的假令牌。
