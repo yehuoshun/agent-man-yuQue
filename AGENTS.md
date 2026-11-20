@@ -59,6 +59,13 @@ Windows 上少一个就起不来。`.cmd` / `.bat` 靠 `cmd.exe` 跑，拼命令
 哈希只算正文稳定内核（不含时刻、页脚与相对时间文案）、state.json 原子写、坏 state.json 当空状态不崩。
 卫生三条（行宽 / BOM / CRLF）用 `node scripts/check-style.mjs` 自查，提交前跑一遍。
 
+**`tools/integration.mjs` 不进 `npm test`**：它起真本体 CLI + 假语雀 + 真插件，跑一趟两分钟
+（含一条跨整分钟的等待），塞进 `node --test` 会把 CI 拖长十倍。它验的是**两仓联调**——契约形状、
+无参零请求、数据只走本体 CLI、upsert/幂等/目录树/退出码、本体屏上真出现 `（yuQue）`。改契约、
+改无参那一行、改调用形状、改幂等逻辑时必须跑；只改文案或纯单测不用。
+临时目录一律 `mkdtempSync`（别写死仓库内固定目录——曾经写死 `.run`，两份并发时互相删 `state.json`，
+造出过假红）；**同机别并发跑两份**。
+
 ## 凭据
 
 令牌只从 `YUQUE_TOKEN` 或 `--token-file` 读，不落盘、不回显、不写进日志与提交信息。
