@@ -219,6 +219,9 @@ node tools/integration.mjs                                   # 32 条，约 2 �
 真出现 `（yuQue）` 那一行。跑一趟两分钟，所以**不进 CI**；改了契约、无参那一行、调用形状或幂等
 逻辑再跑。红线与失败怎么读见 [tools/README.md](tools/README.md)。
 
+联调踩过的坑记在 [docs/integration-findings.md](docs/integration-findings.md)：
+15 条 F 编号，每条都有根因、修法与锁它的断言，别把那些约束改回去。
+
 ## 隐私
 
 令牌、cookie、真实姓名/邮箱一律不进仓库；测试里只有一眼可辨的假令牌。

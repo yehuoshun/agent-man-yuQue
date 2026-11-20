@@ -66,6 +66,10 @@ Windows 上少一个就起不来。`.cmd` / `.bat` 靠 `cmd.exe` 跑，拼命令
 临时目录一律 `mkdtempSync`（别写死仓库内固定目录——曾经写死 `.run`，两份并发时互相删 `state.json`，
 造出过假红）；**同机别并发跑两份**。
 
+联调发现过的问题（含本体侧自递归、跨分钟幂等、目录树全量替换、退出码 75 等）记在
+`docs/integration-findings.md`，只增不删。改 `src/sync.mjs` / `src/render.mjs` / `src/api.mjs`
+之前先扫一遍——那些约束都已经被断言锁住，改回去会红。
+
 ## 凭据
 
 令牌只从 `YUQUE_TOKEN` 或 `--token-file` 读，不落盘、不回显、不写进日志与提交信息。
