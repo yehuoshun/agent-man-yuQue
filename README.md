@@ -23,7 +23,7 @@ npm link            # 把 bin/agent-man-yuQue.mjs 链到全局，本体直接能
 
 要求：Node ≥ 20，零依赖。
 
-## 三种模式
+## 四个入口
 
 ### 1. `--describe`：给本体发现用
 
@@ -120,6 +120,9 @@ $ agent-man-yuQue sync                    # 什么都没变：一个请求都不
 
 - `--dry-run`：只打印将要做什么，**一个请求都不发**（连 GET 都不发）。
 - `--only situation` / `--only memory`：只推一篇（另一篇照常报「没变，跳过」或不动）。
+- `--token-file <路径>`：从文件里读令牌，代替 `YUQUE_TOKEN`（每次现读、不回显、不落盘；
+  整份内容 trim 后当令牌，空文件退 69）。放在命令行而不是变量表里，是因为它只在 `sync`
+  这一个入口有效。
 - 幂等靠 sha256：`state.json` 里记每篇的 `hash`，同一内容不重发。
   哈希只算**正文的稳定内核**，而且这个内核里一个时间都不许有：不含 `同步于 …` 那一行时刻、
   不含页脚，也不含「夜深了」「3 小时前」「还剩多久」这类相对时间文案——它们每过一分钟就变，
@@ -147,7 +150,6 @@ $ agent-man-yuQue sync                    # 什么都没变：一个请求都不
 | 变量 | 默认 | 说明 |
 | --- | --- | --- |
 | `YUQUE_TOKEN` | — | 语雀令牌，**只有 `sync` 需要**。绝不落盘、绝不回显、不进仓库 |
-| `--token-file <路径>` | — | 用文件里的令牌代替 `YUQUE_TOKEN`（逐次读，不回显） |
 | `YUQUE_NAMESPACE` | —（必填） | 目标知识库，形如 `登录名/库短名`。**没有内置默认值**：不给就退 64 |
 | `YUQUE_API_BASE` | `https://www.yuque.com/api/v2` | 只接受 `http(s)://`。本地假服务、代理、换域名都改这个 |
 | `YUQUE_TIMEOUT_MS` | `15000` | 单次请求超时，超了退 75 |
@@ -228,7 +230,7 @@ node tools/integration.mjs                                   # 33 条，约 2 �
 逻辑再跑。红线与失败怎么读见 [tools/README.md](tools/README.md)。
 
 联调踩过的坑记在 [docs/integration-findings.md](docs/integration-findings.md)：
-15 条 F 编号，每条都有根因、修法与锁它的断言，别把那些约束改回去。
+17 条 F 编号，每条都有根因、修法与锁它的断言，别把那些约束改回去。
 从头验一遍（七条命令，不含令牌）照 [docs/acceptance.md](docs/acceptance.md) 走。
 
 ## 隐私

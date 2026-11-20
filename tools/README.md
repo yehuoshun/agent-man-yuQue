@@ -9,7 +9,7 @@ upsert/幂等逻辑，或者本体侧改了零件装配/sense/屏幕 —— 跑�
 
 ```powershell
 $env:AGENT_MAN_REPO = '<本体仓库根，含 bin/agent-man.mjs>'   # 或把本体放在兄弟目录 ../agent-man
-node tools/integration.mjs                      # 全量 A~F 共 32 条，约 2 分钟（有跨整分钟的等待）
+node tools/integration.mjs                      # 全量 A~F 共 33 条，约 2 分钟（有跨整分钟的等待）
 node tools/integration.mjs --only=A,B,C2,F      # 只跑选中组/断言，改名后先跑这个（几秒）
 ```
 
