@@ -4,7 +4,15 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { createApi } from './api.mjs'
-import { dataHomeOf, fail, requireToken, resolveAgentMan, resolveConfig } from './config.mjs'
+import {
+  NO_NAMESPACE_LINE,
+  dataHomeOf,
+  fail,
+  homeOf,
+  requireToken,
+  resolveAgentMan,
+  resolveConfig,
+} from './config.mjs'
 import { renderMemory, renderSituation, stampOf } from './render.mjs'
 import { hashOf, loadState, saveState } from './state.mjs'
 
@@ -126,9 +134,18 @@ export function collectSources(env = process.env) {
 
 // 两篇都从本体现取现渲：哈希只算 core，而 core 只由稳定内容构成（不含生成时刻、页脚、
 // 也不含"3h 前 / 夜深了"这类随钟走的文案），否则幂等永远不成立。
+// 目标库的来源有先后：YUQUE_NAMESPACE > state.json 里记的上次库名。state 必须先把出来，
+// 所以这里先读盘、再解析配置——读 state 只是读，无参模式"零写盘"的承诺不受影响。
+// 读出来的 state 与警告一并带回去：三个用途（无参 / status / sync）都要它们，不重复读盘。
 export function buildDocs(env = process.env, options = {}) {
   const now = toDate(options.now)
-  const cfg = resolveConfig(env, { tokenFile: options.tokenFile })
+  const warnings = []
+  const home = homeOf(env)
+  const state = loadState(home, (one) => warnings.push(one))
+  // 沿用上次的库名只对"读"成立：无参和 status 说清"上次往哪写"就够了。sync 是写操作，
+  // 目标必须每次由人明说——它传 useStateNamespace: false，缺 YUQUE_NAMESPACE 就退 64。
+  const inherited = options.useStateNamespace === false ? null : state.namespace
+  const cfg = resolveConfig(env, { tokenFile: options.tokenFile, namespace: inherited })
   const sources = collectSources(env)
   const stamp = stampOf(now)
   const docs = cfg.docs.map((spec) => {
@@ -138,7 +155,7 @@ export function buildDocs(env = process.env, options = {}) {
       : renderMemory({ ...common, memory: sources.memory, rules: sources.rules, self: sources.self })
     return { ...spec, core: rendered.core, body: rendered.body, hash: hashOf(rendered.core) }
   })
-  return { cfg, sources, docs, stamp, now }
+  return { cfg, sources, docs, stamp, now, state, warnings }
 }
 
 function judge(doc, state) {
@@ -168,11 +185,20 @@ export function agoPhrase(ago) {
 
 // 无参模式：只读一行，不联网、不写盘（读 state.json 只是读，不落笔）。
 // 本体骨架会把多行折成一行并加 "· …（yuQue）"，所以这里既不自带前缀也不换行，控制在 ~30 cost。
+// 缺**配置**必须退 0 并给一句话：这一行是"答话"，退非 0 会被本体记进 failures 并出 `! ` 噪声。
+// 但"本体找不到/本体超时"是**依赖**缺失（design §8 的 69 / 75），照旧往上抛——那件事该被看见，
+// 而且它不是读者改一行环境变量就能好的事，混进"一行答话"里只会让人以为插件坏了。
+// 64 只留给真正要动世界的两个入口（sync / status），它们能让人去改配置。
 export function senseLine(env = process.env, options = {}) {
   const now = toDate(options.now)
-  const built = buildDocs(env, { now })
-  const warnings = []
-  const state = loadState(built.cfg.home, (one) => warnings.push(one))
+  let built
+  try {
+    built = buildDocs(env, { now, tokenFile: options.tokenFile })
+  } catch (e) {
+    if (e?.kind !== 'no-namespace') throw e
+    return { line: NO_NAMESPACE_LINE, stale: null, warnings: [], cfg: null, state: null, problem: e }
+  }
+  const { state, warnings } = built
   const changed = built.docs.filter((doc) => judge(doc, state).stale)
   const stale = changed.length
   const ago = state.lastAt === null ? null : agoOf(state.lastAt, now)
@@ -190,11 +216,11 @@ export function senseLine(env = process.env, options = {}) {
 }
 
 // status：纯本地（不联网），把"每篇是否落后"摊开；--json 只出一行。
+// 它是本地状态的入口，缺库在这里才退 64：状态得说清"上次往哪个库写的"，猜一个就是撒谎。
 export function statusView(env = process.env, options = {}) {
   const now = toDate(options.now)
-  const built = buildDocs(env, { now })
-  const warnings = []
-  const state = loadState(built.cfg.home, (one) => warnings.push(one))
+  const built = buildDocs(env, { now, tokenFile: options.tokenFile })
+  const { state, warnings } = built
   const ago = state.lastAt === null ? null : agoOf(state.lastAt, now)
   const docs = built.docs.map((doc) => {
     const prev = state.docs[doc.slug]
@@ -340,13 +366,18 @@ function dryLine(doc, prev, why) {
 // 缺 repo 写权限时正文能成、树挂不上，下次必须只补树、不重发正文。
 export async function syncRun(env = process.env, options = {}) {
   const now = toDate(options.now)
-  const built = buildDocs(env, { now, tokenFile: options.tokenFile })
+  // useStateNamespace: false —— 写操作不许靠"上次往哪写"猜目标，缺 YUQUE_NAMESPACE 直接 64。
+  const built = buildDocs(env, { now, tokenFile: options.tokenFile, useStateNamespace: false })
   const cfg = built.cfg
   // 只对真要动的那几篇判哈希：--only 时不该因为另一篇变了就多发请求。
   const docs = pickDocs(built.docs, options.only)
   const dryRun = options.dryRun === true
-  const warnings = []
-  const state = loadState(cfg.home, (one) => warnings.push(one))
+  const warnings = built.warnings
+  const state = built.state
+  // 写下"这一趟真往哪个库写了"：下次不设 YUQUE_NAMESPACE 时，无参与 status 靠它沿用，
+  // 而不是退回某个代码里钉死的库名（那既可能写错地方，也会把别人的库名留在源码里）。
+  // dry-run 不落盘，所以这个赋值只在真写那几条路上被 saveState 带出去。
+  state.namespace = cfg.namespace
   const report = new Map()
   const planned = []
 

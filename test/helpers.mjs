@@ -250,6 +250,7 @@ export async function startYuque(options = {}) {
     docs: new Map(),
     nextId: 1000,
     requests: [],
+    // 一眼假的库形状：真库的数字 id / 短名一概不进仓库，回包只要形状对得上就行。
     repo: { id: 12345678, slug: 'mock-book', namespace: 'mock-user/mock-book', public: 0 },
     tocNodes: (options.tocNodes ?? DEFAULT_TOC_NODES).map((one) => ({ ...one })),
     mode: options.mode ?? 'ok',

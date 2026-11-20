@@ -20,7 +20,7 @@ import {
 // 起点：处境那一刻 + 12 秒（和真机一样，同步时刻比处境晚一点）。
 const T0 = new Date(SCENE_AT + 12 * 1000)
 const STAMP = stampOf(T0)
-const NS = 'mock-user/mock-book'
+const NS = 'mock-user/mock-repo'
 
 // 用具例自己建出来的目录要在文件末尾统一删；假服务由 closeAllFakes 兜底。
 const STRAY = []
@@ -427,4 +427,60 @@ test('sync 的输出只占几行，不会把骨架的预算撑爆', async () => 
   const r = await h.run(['sync'])
   assert.ok(Buffer.byteLength(r.out, 'utf8') <= 8 * 1024, 'stdout 控制在 8KB 内')
   assert.equal(r.lines.length, 2)
+})
+
+// cost 口径与本体一致：CJK / 全角按 1.0、ASCII 按 0.28，按码点累加（零依赖，不复刻整张表，
+// 只收这一行真会出现的字符区间就够了）。无参那一行要能塞进骨架的一屏预算。
+const WIDE_CH = /[\u2E80-\u303E\u4E00-\u9FFF\uFF00-\uFF60\uFFE0-\uFFE6\u2600-\u27BF]/u
+
+function costOf(text) {
+  let used = 0
+  for (const ch of text) used += WIDE_CH.test(ch) ? 1 : 0.28
+  return used
+}
+
+test('无参：库名没设、state 里也没记过 → 退 0 只差一句话，不联网不写盘', async () => {
+  const h = await harness({ env: { YUQUE_NAMESPACE: '' } })
+  const r = await h.run([])
+  assert.equal(r.code, 0, '无参是"答话"：缺配置也退 0，否则会被本体记成插件失败')
+  assert.deepEqual(r.lines, ['语雀：没设目标知识库（YUQUE_NAMESPACE）'])
+  assert.ok(costOf(r.lines[0]) <= 30, `这一行要塞进骨架预算，现在 ${costOf(r.lines[0])}`)
+  assert.equal(h.yuque.requests.length, 0, '无参不许联网')
+  assert.equal(h.agent.calls().length, 0, '配置都不全，连本体进程都别起')
+  assert.equal(fs.existsSync(h.statePath), false, '无参不许写盘')
+})
+
+test('库名只记在 state 里：无参与 status 沿用，sync 一律退 64（写操作的目标要每次明说）',
+  async () => {
+    const h = await harness()
+    assert.equal((await h.run(['sync'])).code, 0, '先真写一趟，库名才会落进 state')
+    assert.equal(h.stateFile().namespace, NS, '真 sync 必须把"这次写了哪个库"记下来')
+    const sent = h.yuque.requests.length
+
+    // 干净 env：YUQUE_NAMESPACE 整个拿掉，只剩 state.json 里那条记录。
+    delete h.env.YUQUE_NAMESPACE
+    assert.deepEqual((await h.run([])).lines, ['语雀：与本体一致（刚同步过）'])
+    const text = await h.run(['status'])
+    assert.equal(text.code, 0, text.err)
+    assert.ok(text.lines[0].includes(NS), `抬头要说出上次那个库：${text.lines[0]}`)
+    const json = JSON.parse((await h.run(['status', '--json'])).lines[0])
+    assert.equal(json.namespace, NS)
+
+    const sync = await h.run(['sync'])
+    assert.equal(sync.code, 64, 'sync 不许靠"上次往哪写"猜目标')
+    assert.ok(sync.err.includes('没设目标知识库'), sync.err)
+    assert.ok(sync.err.includes('登录名/库短名'), sync.err)
+    assert.equal(h.yuque.requests.length, sent, '这四趟一个请求都不该发')
+  })
+
+// 缺**配置**退 0、缺**依赖**照旧 69：这两件事在骨架那边的后果不同（前者只是一句建议，
+// 后者要进 failures 攒冷却）。别把"本体不在"混成一句答话——那会让真故障悄悄消失。
+test('无参遇到本体找不到：仍是依赖缺失（69），不许被"一行答话"吞掉', async () => {
+  const h = await harness({ env: { AGENT_MAN_BIN: path.join(os.tmpdir(), 'no-such-agent-man.mjs') } })
+  const r = await h.run([])
+  assert.equal(r.code, 69, '本体起不来是依赖问题，不是"你没配库"')
+  assert.ok(r.err.includes('! '), r.err)
+  assert.ok(r.err.includes('agent-man'), r.err)
+  assert.deepEqual(r.lines, [], '不许一边说 69 一边还吐一行答话')
+  assert.equal(h.yuque.requests.length, 0)
 })

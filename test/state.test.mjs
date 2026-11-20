@@ -75,9 +75,12 @@ test('写盘是原子的：写完读回来一模一样，且目录里不留 .tmp
       lastAt: '2026-11-20T00:31:12+08:00',
       tocAt: null,
       tocPending: false,
+      namespace: 'mock-user/mock-repo',
     }
     saveState(home, state)
     assert.deepEqual(loadState(home), state)
+    // 库名是"上次真往哪写过"的凭据：读回来必须在，否则无参只能报缺库。
+    assert.equal(loadState(home).namespace, 'mock-user/mock-repo')
     const left = fs.readdirSync(home).filter((one) => one.endsWith('.tmp'))
     assert.deepEqual(left, [], '临时文件必须已经 rename 掉')
 

@@ -14,7 +14,7 @@ const USAGE = [
   '  --describe        插件契约回包（一行 JSON，供 agent-man 发现）',
   '  --help            这份说明',
   '',
-  '环境变量：YUQUE_TOKEN（sync 必需）· YUQUE_NAMESPACE（默认 mock-user/mock-book）',
+  '环境变量：YUQUE_TOKEN（sync 必需）· YUQUE_NAMESPACE（必填，形如 登录名/库短名）',
   '          YUQUE_API_BASE · AGENT_MAN_YUQUE_HOME · AGENT_MAN_BIN / AGENT_MAN_REPO',
   '',
 ].join('\n')
