@@ -2,7 +2,7 @@
 // 三种用途共用同一套"取数 + 判断落后"：无参的一行、status 的表格、sync 的真实推送。
 import fs from 'node:fs'
 import path from 'node:path'
-import { spawnSync } from 'node:child_process'
+import { spawn } from 'node:child_process'
 import { createApi } from './api.mjs'
 import {
   NO_NAMESPACE_LINE,
@@ -50,44 +50,92 @@ function quoted(text) {
   return /[\s"]/.test(text) ? `"${text}"` : text
 }
 
+// 取消（兄弟调用先坏了，或调用方不要了）：不是本体的错，也不是超时，别让它冒充 75 的文案。
+function cancelled(args) {
+  const e = fail(75, `agent-man 还没答上来就被取消了（${args.join(' ')}）`)
+  e.cancelled = true
+  return e
+}
+
+const OUT_MAX = 8 * 1024 * 1024
+
 // 调本体：一条命令一个进程，stdout 只当数据用。
-// 退出码契约要分清三件事：本体超时（timeout / 被杀）是 75（超时，不是缺失），
+// 退出码契约要分清三件事：本体超时（到点被杀）是 75（超时，不是缺失），
 // 本体找不到是 69（依赖缺失），本体自己说不（非 0 且 stderr 有原文）也是 69，但要把原文带上。
+// 这里是 async 的：四份取数彼此不依赖，串行跑在 Windows 上要 0.9s 上下，而注入那边只等
+// parts.deadline（默认 1200ms）——串行几乎必然超期（实测 1.3–1.6s，建议行整块被丢）。
+// 一条命令仍是一个进程，只是四条一起跑；`signal` 用来在一条坏掉时把兄弟调用撤掉。
 export function runAgentMan(bin, args, options = {}) {
   const env = envForHost(options.env ?? process.env)
   const timeoutMs = options.timeoutMs ?? RUN_TIMEOUT_MS
+  const signal = options.signal ?? null
   const bulk = [...bin.prefix, ...args]
   const useShell = process.platform === 'win32' && /\.(cmd|bat)$/i.test(bin.cmd)
   // 走 shell 时整条命令行自己拼成一个参数、args 传空数组：Node 24 对
   // 「shell: true 还带 args」会打 DEP0190 弃用警告，而我们本来就不需要它的拼接。
-  const res = spawnSync(useShell ? [bin.cmd, ...bulk].map((one) => quoted(one)).join(' ') : bin.cmd,
-    useShell ? [] : bulk, {
-    encoding: 'utf8',
-    timeout: timeoutMs,
-    env,
-    shell: useShell,
-    maxBuffer: 8 * 1024 * 1024,
-    windowsHide: true,
-  })
-  if (res.error !== undefined && res.error !== null) {
-    const code = res.error.code ?? ''
-    const signal = typeof res.signal === 'string' ? res.signal : ''
-    if (code === 'ETIMEDOUT' || res.error.killed === true || signal !== '') {
-      throw fail(75, `agent-man 超过 ${timeoutMs}ms 没答上来（${args.join(' ')}）`)
+  const command = useShell ? [bin.cmd, ...bulk].map((one) => quoted(one)).join(' ') : bin.cmd
+  const argv = useShell ? [] : bulk
+  return new Promise((resolve, reject) => {
+    if (signal !== null && signal.aborted === true) {
+      reject(cancelled(args))
+      return
     }
-    throw fail(69, `起不来 agent-man（${bin.cmd}）：${code === '' ? res.error.message : code}`)
-  }
-  const out = typeof res.stdout === 'string' ? res.stdout : ''
-  const errText = typeof res.stderr === 'string' ? res.stderr : ''
-  if (res.status !== 0) {
-    const why = firstLine(errText)
-    throw fail(69, `agent-man 说不行（${args.join(' ')}，exit ${res.status}）${why === '' ? '' : `：${why}`}`)
-  }
-  return { out, err: errText }
+    const child = spawn(command, argv, {
+      env,
+      shell: useShell,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true,
+    })
+    let out = ''
+    let errText = ''
+    let timedOut = false
+    let done = false
+    let timer = null
+    function finish(settle, value) {
+      if (done) return
+      done = true
+      clearTimeout(timer)
+      if (signal !== null) signal.removeEventListener('abort', onAbort)
+      settle(value)
+    }
+    function onAbort() {
+      child.kill()
+      finish(reject, cancelled(args))
+    }
+    timer = setTimeout(() => {
+      timedOut = true
+      child.kill()
+    }, timeoutMs)
+    if (signal !== null && typeof signal.addEventListener === 'function') {
+      signal.addEventListener('abort', onAbort, { once: true })
+    }
+    child.stdout.setEncoding('utf8')
+    child.stderr.setEncoding('utf8')
+    // 上限照 spawnSync 的 maxBuffer 抄：超了就只留前面这段，别把内存吃光。
+    child.stdout.on('data', (chunk) => { if (out.length < OUT_MAX) out += chunk })
+    child.stderr.on('data', (chunk) => { if (errText.length < OUT_MAX) errText += chunk })
+    child.on('error', (e) => {
+      const code = e.code ?? ''
+      finish(reject, fail(69, `起不来 agent-man（${bin.cmd}）：${code === '' ? e.message : code}`))
+    })
+    child.on('close', (status, killedBy) => {
+      if (timedOut === true || (killedBy !== null && killedBy !== undefined)) {
+        finish(reject, fail(75, `agent-man 超过 ${timeoutMs}ms 没答上来（${args.join(' ')}）`))
+        return
+      }
+      if (status !== 0) {
+        const why = firstLine(errText)
+        const tail = why === '' ? '' : `：${why}`
+        finish(reject, fail(69, `agent-man 说不行（${args.join(' ')}，exit ${status}）${tail}`))
+        return
+      }
+      finish(resolve, { out, err: errText })
+    })
+  })
 }
 
-function jsonOf(bin, args, env) {
-  const text = runAgentMan(bin, args, { env }).out.trim()
+async function jsonOf(bin, args, env, signal = null) {
+  const text = (await runAgentMan(bin, args, { env, signal })).out.trim()
   try {
     return JSON.parse(text)
   } catch {
@@ -123,13 +171,39 @@ export function agentManVersion(env = process.env, bin = null) {
 // 处境曾经取纯文本原样，但那份原文首行是分钟级时间戳（`agent-man · 2026-11-20 00:31`）：
 // 拿它当哈希输入等于每分钟"内容变了"，sync 每次都写一遍。改取结构化处境后，
 // 时间只进正文、不进哈希（见 render.mjs 的字段判定）。
-export function collectSources(env = process.env) {
+export async function collectSources(env = process.env) {
   const bin = resolveAgentMan(env)
-  const scene = jsonOf(bin, ['context', 'show', '--json'], env)
-  const memory = jsonOf(bin, ['memory', 'ls', '--json'], env)
-  const rules = jsonOf(bin, ['rule', 'ls', '--json'], env)
-  const self = jsonOf(bin, ['self', 'show', '--json'], env)
-  return { bin, scene, memory, rules, self, home: dataHomeOf(env), version: agentManVersion(env, bin) }
+  // 四份取数互不依赖，一起问：串行时四次进程启动在 Windows 上 ≈0.9s，加上插件自身启动/渲染
+  // 就到 1.3–1.6s，正好越过注入那边 parts.deadline 的 1200ms（实测五次五次被丢）。
+  // 一条坏了就把兄弟撤掉，抛的是先坏的那条——不拿"被取消"冒充真原因。
+  const jobs = [
+    ['scene', ['context', 'show', '--json']],
+    ['memory', ['memory', 'ls', '--json']],
+    ['rules', ['rule', 'ls', '--json']],
+    ['self', ['self', 'show', '--json']],
+  ]
+  const ctrl = new AbortController()
+  let first = null
+  const running = jobs.map(([key, args]) => jsonOf(bin, args, env, ctrl.signal).then((value) => [key, value],
+    (e) => {
+      if (first === null && e?.cancelled !== true) {
+        first = e
+        ctrl.abort()
+      }
+      throw e
+    }))
+  const settled = await Promise.allSettled(running)
+  if (first !== null) throw first
+  const got = Object.fromEntries(settled.map((one) => one.value))
+  return {
+    bin,
+    scene: got.scene,
+    memory: got.memory,
+    rules: got.rules,
+    self: got.self,
+    home: dataHomeOf(env),
+    version: agentManVersion(env, bin),
+  }
 }
 
 // 两篇都从本体现取现渲：哈希只算 core，而 core 只由稳定内容构成（不含生成时刻、页脚、
@@ -137,7 +211,7 @@ export function collectSources(env = process.env) {
 // 目标库的来源有先后：YUQUE_NAMESPACE > state.json 里记的上次库名。state 必须先把出来，
 // 所以这里先读盘、再解析配置——读 state 只是读，无参模式"零写盘"的承诺不受影响。
 // 读出来的 state 与警告一并带回去：三个用途（无参 / status / sync）都要它们，不重复读盘。
-export function buildDocs(env = process.env, options = {}) {
+export async function buildDocs(env = process.env, options = {}) {
   const now = toDate(options.now)
   const warnings = []
   const home = homeOf(env)
@@ -146,7 +220,7 @@ export function buildDocs(env = process.env, options = {}) {
   // 目标必须每次由人明说——它传 useStateNamespace: false，缺 YUQUE_NAMESPACE 就退 64。
   const inherited = options.useStateNamespace === false ? null : state.namespace
   const cfg = resolveConfig(env, { tokenFile: options.tokenFile, namespace: inherited })
-  const sources = collectSources(env)
+  const sources = await collectSources(env)
   const stamp = stampOf(now)
   const docs = cfg.docs.map((spec) => {
     const common = { stamp, home: sources.home, version: sources.version }
@@ -189,11 +263,11 @@ export function agoPhrase(ago) {
 // 但"本体找不到/本体超时"是**依赖**缺失（design §8 的 69 / 75），照旧往上抛——那件事该被看见，
 // 而且它不是读者改一行环境变量就能好的事，混进"一行答话"里只会让人以为插件坏了。
 // 64 只留给真正要动世界的两个入口（sync / status），它们能让人去改配置。
-export function senseLine(env = process.env, options = {}) {
+export async function senseLine(env = process.env, options = {}) {
   const now = toDate(options.now)
   let built
   try {
-    built = buildDocs(env, { now, tokenFile: options.tokenFile })
+    built = await buildDocs(env, { now, tokenFile: options.tokenFile })
   } catch (e) {
     if (e?.kind !== 'no-namespace') throw e
     return { line: NO_NAMESPACE_LINE, stale: null, warnings: [], cfg: null, state: null, problem: e }
@@ -217,9 +291,9 @@ export function senseLine(env = process.env, options = {}) {
 
 // status：纯本地（不联网），把"每篇是否落后"摊开；--json 只出一行。
 // 它是本地状态的入口，缺库在这里才退 64：状态得说清"上次往哪个库写的"，猜一个就是撒谎。
-export function statusView(env = process.env, options = {}) {
+export async function statusView(env = process.env, options = {}) {
   const now = toDate(options.now)
-  const built = buildDocs(env, { now, tokenFile: options.tokenFile })
+  const built = await buildDocs(env, { now, tokenFile: options.tokenFile })
   const { state, warnings } = built
   const ago = state.lastAt === null ? null : agoOf(state.lastAt, now)
   const docs = built.docs.map((doc) => {
@@ -367,7 +441,7 @@ function dryLine(doc, prev, why) {
 export async function syncRun(env = process.env, options = {}) {
   const now = toDate(options.now)
   // useStateNamespace: false —— 写操作不许靠"上次往哪写"猜目标，缺 YUQUE_NAMESPACE 直接 64。
-  const built = buildDocs(env, { now, tokenFile: options.tokenFile, useStateNamespace: false })
+  const built = await buildDocs(env, { now, tokenFile: options.tokenFile, useStateNamespace: false })
   const cfg = built.cfg
   // 只对真要动的那几篇判哈希：--only 时不该因为另一篇变了就多发请求。
   const docs = pickDocs(built.docs, options.only)

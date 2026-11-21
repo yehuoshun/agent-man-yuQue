@@ -5,7 +5,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { createApi, main, runAgentMan, stampOf } from '../src/index.mjs'
+import { collectSources, createApi, main, runAgentMan, stampOf } from '../src/index.mjs'
 import {
   MOCK_TOKEN,
   SCENARIO_DEFAULT,
@@ -97,11 +97,12 @@ test('调本体四份取数一律带 --json，少一个就拿不到数据', asyn
   const r = await h.run(['status'])
   assert.equal(r.code, 0, r.err)
   const calls = h.agent.calls()
-  assert.deepEqual(calls.map((one) => one.slice(0, 2)), [
-    ['context', 'show'],
-    ['memory', 'ls'],
-    ['rule', 'ls'],
-    ['self', 'show'],
+  // 四份是并行问的，谁先谁后不定；这里只认"问的是这四件事"，不认顺序。
+  assert.deepEqual(calls.map((one) => one.slice(0, 2).join(' ')).sort(), [
+    'context show',
+    'memory ls',
+    'rule ls',
+    'self show',
   ])
   for (const one of calls) assert.equal(one[2], '--json', `${one[0]} ${one[1]} 少了 --json`)
 })
@@ -150,7 +151,8 @@ test('AGENT_MAN_BIN 指到 .cmd 垫片也能跑：路径带空格也一样（真
     assert.equal(r.lines[1], '  上次同步  还没同步过', r.out)
     const calls = h.agent.calls()
     assert.equal(calls.length, 4, '垫片要把四份取数原样转给假本体')
-    assert.deepEqual(calls[0], ['context', 'show', '--json'])
+    const lines = calls.map((one) => one.join(' '))
+    assert.ok(lines.includes('context show --json'), lines.join(' / '))
   })
 
 test('首次 sync：新建两篇后各挂一次树，且绝不整棵替换 toc', async () => {
@@ -364,14 +366,45 @@ test('语雀回的不是 JSON：1，并且不装懂', async () => {
   assert.ok(r.err.includes('不是 JSON'), r.err)
 })
 
-test('本体超时算超时（75），不算缺失', () => {
+test('本体超时算超时（75），不算缺失', async () => {
   const agent = makeAgentMan({ sleep: 1500 })
   STRAY.push(agent.dir)
   const bin = { cmd: process.execPath, prefix: [agent.script] }
-  assert.throws(
+  await assert.rejects(
     () => runAgentMan(bin, ['context', 'show', '--json'], { env: { ...process.env }, timeoutMs: 120 }),
     (e) => e.exitCode === 75 && /超过 120ms/.test(e.message),
   )
+})
+
+test('四份取数一起问：不比串行更慢', async () => {
+  // 假本体每次调用先 sleep 300ms。串行要四倍（1200ms 起），并行只比一次多一点点。
+  // 钉的是"注入那边只等 parts.deadline（1200ms）"这个前提，不是某个实现细节。
+  const agent = makeAgentMan({ sleep: 300 })
+  STRAY.push(agent.dir)
+  const started = Date.now()
+  const env = { ...process.env, AGENT_MAN_BIN: agent.script, AGENT_MAN_HOME: agent.dir }
+  const sources = await collectSources(env)
+  const spent = Date.now() - started
+  assert.ok(spent < 900, `四份取数花了 ${spent}ms：串行会到 1200ms 以上`)
+  assert.equal(sources.scene.budget, 550)
+  assert.equal(sources.memory.items.length, 1)
+  assert.equal(sources.rules.live, 1)
+  assert.ok(sources.self.text.includes('搭子'), sources.self.text)
+  assert.equal(agent.calls().length, 4, '四份一份不少')
+})
+
+test('本体坏了就撤掉兄弟：抛先坏的那条，不陪着别的慢慢等', async () => {
+  // 剧本：每次调用先 sleep 600ms 再退 64。串行要 2400ms 才见到第一条错，
+  // 并行则在第一份坏掉时就收场，剩下的直接取消（它们的 75 不许冒充原因）。
+  const agent = makeAgentMan({ sleep: 600, fail: 64 })
+  STRAY.push(agent.dir)
+  const started = Date.now()
+  await assert.rejects(
+    () => collectSources({ ...process.env, AGENT_MAN_BIN: agent.script, AGENT_MAN_HOME: agent.dir }),
+    (e) => e.exitCode === 69 && /exit 64/.test(e.message) && e.cancelled !== true,
+  )
+  const spent = Date.now() - started
+  assert.ok(spent < 1500, `等了 ${spent}ms：说明还在串着等`)
 })
 
 test('本体找不到算缺失（69），并说清起不来的是什么', async () => {

@@ -84,7 +84,7 @@ export async function main(argv = [], ctx = {}) {
 
   try {
     if (head === '') {
-      const sense = senseLine(env, { now })
+      const sense = await senseLine(env, { now })
       for (const one of sense.warnings) err(`! ${one}\n`)
       out(`${sense.line}\n`)
       return 0
@@ -105,7 +105,7 @@ export async function main(argv = [], ctx = {}) {
 
     if (head === 'status') {
       const flags = parseStatusFlags(args.slice(1))
-      const view = statusView(env, { now })
+      const view = await statusView(env, { now })
       for (const one of view.warnings) err(`! ${one}\n`)
       out(flags.json ? `${statusJson(view)}\n` : `${view.lines.join('\n')}\n`)
       return 0
