@@ -5,6 +5,7 @@ import path from 'node:path'
 import { spawn } from 'node:child_process'
 import { createApi } from './api.mjs'
 import {
+  DOC_SPECS,
   NO_NAMESPACE_LINE,
   dataHomeOf,
   fail,
@@ -17,6 +18,13 @@ import { renderMemory, renderSituation, stampOf } from './render.mjs'
 import { hashOf, loadState, saveState } from './state.mjs'
 
 const RUN_TIMEOUT_MS = 20000
+
+// 无参那一行的总期限：声明出去的 timeout_ms 是 5000（src/describe.mjs），骨架到点就硬杀；
+// 单条命令的 20s 与语雀自己的 15s 叠起来根本兑现不了那个声明（实测假本体睡 7s 时无参跑 7.4s，
+// 真骨架按 5000ms 硬杀 → failures 里一句"yuQue 超时"，读者看到的却是"零件坏了"）。
+// 所以无参自己卡一条 4s 总期限，留 1s 给进程启动与渲染：答不上来就退 0 说一句话，别等被杀。
+export const SENSE_DEADLINE_MS = 4000
+export const SENSE_TIMEOUT_LINE = '语雀：本体这次没答上来'
 
 // 无参只说一行：缺库有自己那句更贴切的话；别的配置错（库名写错、基址不是 http(s)、
 // 超时不是正整数）同样是"读者改一行环境变量"的事，同样退 0 给一句答话——
@@ -176,7 +184,7 @@ export function agentManVersion(env = process.env, bin = null) {
 // 处境曾经取纯文本原样，但那份原文首行是分钟级时间戳（`agent-man · 2026-11-20 00:31`）：
 // 拿它当哈希输入等于每分钟"内容变了"，sync 每次都写一遍。改取结构化处境后，
 // 时间只进正文、不进哈希（见 render.mjs 的字段判定）。
-export async function collectSources(env = process.env) {
+export async function collectSources(env = process.env, options = {}) {
   const bin = resolveAgentMan(env)
   // 四份取数互不依赖，一起问：串行时四次进程启动在 Windows 上 ≈0.9s，加上插件自身启动/渲染
   // 就到 1.3–1.6s，正好越过注入那边 parts.deadline 的 1200ms（实测五次五次被丢）。
@@ -189,6 +197,20 @@ export async function collectSources(env = process.env) {
   ]
   const ctrl = new AbortController()
   let first = null
+  // 有总期限时（只有无参那条路会给）：到点把四份一起撤掉，抛的那条要标出来
+  // ——"整条答话等超了"跟"本体自己慢了"是两件事，前者能降级成一句话，后者要照实报 75。
+  const deadlineMs = Number.isFinite(options.deadlineMs) && options.deadlineMs > 0 ? options.deadlineMs : 0
+  let timer = null
+  if (deadlineMs > 0) {
+    timer = setTimeout(() => {
+      if (first === null) {
+        const e = fail(75, `agent-man 没在 ${deadlineMs}ms 内把四份取数答完（无参只等这么久）`)
+        e.kind = 'deadline'
+        first = e
+      }
+      ctrl.abort()
+    }, deadlineMs)
+  }
   const running = jobs.map(([key, args]) => jsonOf(bin, args, env, ctrl.signal).then((value) => [key, value],
     (e) => {
       if (first === null && e?.cancelled !== true) {
@@ -198,6 +220,7 @@ export async function collectSources(env = process.env) {
       throw e
     }))
   const settled = await Promise.allSettled(running)
+  if (timer !== null) clearTimeout(timer)
   if (first !== null) throw first
   const got = Object.fromEntries(settled.map((one) => one.value))
   return {
@@ -224,8 +247,22 @@ export async function buildDocs(env = process.env, options = {}) {
   // 沿用上次的库名只对"读"成立：无参和 status 说清"上次往哪写"就够了。sync 是写操作，
   // 目标必须每次由人明说——它传 useStateNamespace: false，缺 YUQUE_NAMESPACE 就退 64。
   const inherited = options.useStateNamespace === false ? null : state.namespace
-  const cfg = resolveConfig(env, { tokenFile: options.tokenFile, namespace: inherited })
-  const sources = await collectSources(env)
+  // 读 state 时攒下的 `! ` 警告还没机会交出去就要抛了（配置错、本体慢）：挂在错误上带走，
+  // 否则"坏 state.json 当空状态"那句警告在这两条最需要它的路上恰好被吞掉。
+  let cfg
+  try {
+    cfg = resolveConfig(env, { tokenFile: options.tokenFile, namespace: inherited })
+  } catch (e) {
+    if (e !== null && typeof e === 'object' && e.warnings === undefined) e.warnings = warnings
+    throw e
+  }
+  let sources
+  try {
+    sources = await collectSources(env, { deadlineMs: options.deadlineMs })
+  } catch (e) {
+    if (e !== null && typeof e === 'object' && e.warnings === undefined) e.warnings = warnings
+    throw e
+  }
   const stamp = stampOf(now)
   const docs = cfg.docs.map((spec) => {
     const common = { stamp, home: sources.home, version: sources.version }
@@ -276,13 +313,24 @@ export async function senseLine(env = process.env, options = {}) {
   const now = toDate(options.now)
   let built
   try {
-    built = await buildDocs(env, { now, tokenFile: options.tokenFile })
+    built = await buildDocs(env, {
+      now,
+      tokenFile: options.tokenFile,
+      deadlineMs: options.deadlineMs ?? SENSE_DEADLINE_MS,
+    })
   } catch (e) {
+    const kept = Array.isArray(e?.warnings) ? e.warnings : []
     if (e?.kind === 'no-namespace') {
-      return { line: NO_NAMESPACE_LINE, stale: null, warnings: [], cfg: null, state: null, problem: e }
+      return { line: NO_NAMESPACE_LINE, stale: null, warnings: kept, cfg: null, state: null, problem: e }
+    }
+    // 总期限到了：不是本体坏了，是这一行等不起了——照"缺配置"一个口径，退 0 说一句话。
+    if (e?.kind === 'deadline') {
+      const warnings = [...kept, e.message]
+      return { line: SENSE_TIMEOUT_LINE, stale: null, warnings, cfg: null, state: null, problem: e }
     }
     if (e?.exitCode === 64) {
-      return { line: BAD_CONFIG_LINE, stale: null, warnings: [e.message], cfg: null, state: null, problem: e }
+      const warnings = [...kept, e.message]
+      return { line: BAD_CONFIG_LINE, stale: null, warnings, cfg: null, state: null, problem: e }
     }
     throw e
   }
@@ -437,11 +485,19 @@ async function docIdOf(api, slug) {
   return id
 }
 
+const ONLY_KEYS = DOC_SPECS.map((spec) => spec.key)
+
+// --only 的合法性一眼能判：合法键就是写死的那两篇，不必等四份取数问完再报错
+// （实测 `sync --dry-run --only bogus` 白等 7.4s 才退 64，这段时间它一个字的活也没干）。
+export function assertOnly(only) {
+  if (only === null || only === undefined) return null
+  if (ONLY_KEYS.includes(only)) return only
+  throw fail(64, `--only 只认 ${ONLY_KEYS.join(' 或 ')}，拿到「${only}」`)
+}
+
 function pickDocs(all, only) {
   if (only === null || only === undefined) return all
-  const hit = all.filter((doc) => doc.key === only)
-  if (hit.length === 0) throw fail(64, `--only 只认 situation 或 memory，拿到「${only}」`)
-  return hit
+  return all.filter((doc) => doc.key === only)
 }
 
 function dryLine(doc, prev, why) {
@@ -454,6 +510,8 @@ function dryLine(doc, prev, why) {
 // 缺 repo 写权限时正文能成、树挂不上，下次必须只补树、不重发正文。
 export async function syncRun(env = process.env, options = {}) {
   const now = toDate(options.now)
+  // 参数错先退 64：这比"问完本体再告诉人开关写错了"快一个数量级，也不白起四个进程。
+  assertOnly(options.only)
   // useStateNamespace: false —— 写操作不许靠"上次往哪写"猜目标，缺 YUQUE_NAMESPACE 直接 64。
   const built = await buildDocs(env, { now, tokenFile: options.tokenFile, useStateNamespace: false })
   const cfg = built.cfg
