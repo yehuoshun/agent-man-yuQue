@@ -18,6 +18,11 @@ import { hashOf, loadState, saveState } from './state.mjs'
 
 const RUN_TIMEOUT_MS = 20000
 
+// 无参只说一行：缺库有自己那句更贴切的话；别的配置错（库名写错、基址不是 http(s)、
+// 超时不是正整数）同样是"读者改一行环境变量"的事，同样退 0 给一句答话——
+// 具体错在哪个键由 stderr 那行 `! ` 说清（无参退非 0 会被本体记进 failures）。
+export const BAD_CONFIG_LINE = '语雀：配置有问题，先看 ! 那行'
+
 function toDate(value) {
   if (value instanceof Date) return value
   if (typeof value === 'number' && Number.isFinite(value)) return new Date(value)
@@ -263,14 +268,23 @@ export function agoPhrase(ago) {
 // 但"本体找不到/本体超时"是**依赖**缺失（design §8 的 69 / 75），照旧往上抛——那件事该被看见，
 // 而且它不是读者改一行环境变量就能好的事，混进"一行答话"里只会让人以为插件坏了。
 // 64 只留给真正要动世界的两个入口（sync / status），它们能让人去改配置。
+// 所以这里把**一切**带 64 的配置错都降级：只认 kind 等于 'no-namespace' 时漏掉的
+// checkNamespace / positiveInt / base 校验（那份纯 64 没有 kind），会一路冒到 main 退回 64，
+// 与 README「缺配置退 0」直接冲突（复现：YUQUE_NAMESPACE=abcdef、YUQUE_API_BASE=ftp://x、
+// YUQUE_TIMEOUT_MS=0 都退 64）。69 / 75 是**依赖**缺失（design §8），照旧往上抛。
 export async function senseLine(env = process.env, options = {}) {
   const now = toDate(options.now)
   let built
   try {
     built = await buildDocs(env, { now, tokenFile: options.tokenFile })
   } catch (e) {
-    if (e?.kind !== 'no-namespace') throw e
-    return { line: NO_NAMESPACE_LINE, stale: null, warnings: [], cfg: null, state: null, problem: e }
+    if (e?.kind === 'no-namespace') {
+      return { line: NO_NAMESPACE_LINE, stale: null, warnings: [], cfg: null, state: null, problem: e }
+    }
+    if (e?.exitCode === 64) {
+      return { line: BAD_CONFIG_LINE, stale: null, warnings: [e.message], cfg: null, state: null, problem: e }
+    }
+    throw e
   }
   const { state, warnings } = built
   const changed = built.docs.filter((doc) => judge(doc, state).stale)

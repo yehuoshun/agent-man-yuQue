@@ -485,6 +485,32 @@ test('无参：库名没设、state 里也没记过 → 退 0 只差一句话，
   assert.equal(fs.existsSync(h.statePath), false, '无参不许写盘')
 })
 
+// 无参是"答话"：配置写错也一样——缺库有自己那句更贴切的话，别的配置错各自给一句 +
+// 一行 `! ` 指出错在哪个键。64 只留给 status / sync（它们才是有机会让人去改配置的入口）。
+test('无参遇到配置写错（库名/基址/超时）：退 0 只答一句话，具体错在哪个键走 ! 那行', async () => {
+  const cases = [
+    { name: '库名没斜杠', env: { YUQUE_NAMESPACE: 'abcdef' }, key: 'YUQUE_NAMESPACE' },
+    { name: '基址不是 http(s)', env: { YUQUE_API_BASE: 'ftp://x' }, key: 'YUQUE_API_BASE' },
+    { name: '超时不是正整数', env: { YUQUE_TIMEOUT_MS: '0' }, key: 'YUQUE_TIMEOUT_MS' },
+  ]
+  for (const one of cases) {
+    const h = await harness({ env: one.env })
+    const r = await h.run([])
+    assert.equal(r.code, 0, `${one.name}：无参退非 0 会被本体记进 failures`)
+    assert.equal(r.lines.length, 1, `${one.name}：只许一行答话`)
+    assert.ok(costOf(r.lines[0]) <= 30, `${one.name}：这一行要塞进骨架预算，现在 ${costOf(r.lines[0])}`)
+    assert.ok(r.err.startsWith('! '), `${one.name}：错在哪要走 ! 那行：${r.err}`)
+    assert.ok(r.err.includes(one.key), `${one.name}：! 那行要点名出错的是哪个键：${r.err}`)
+    assert.equal(h.agent.calls().length, 0, `${one.name}：配置就不对，本体进程一个都别起`)
+    assert.equal(h.yuque.requests.length, 0, `${one.name}：无参不许联网`)
+    assert.equal(fs.existsSync(h.statePath), false, `${one.name}：无参不许写盘`)
+  }
+  // 反过来：status / sync 是"能让人去改配置"的入口，配置错照旧退 64。
+  const h = await harness({ env: { YUQUE_API_BASE: 'ftp://x' } })
+  assert.equal((await h.run(['status'])).code, 64, 'status 照旧 64')
+  assert.equal((await h.run(['sync'])).code, 64, 'sync 照旧 64')
+})
+
 test('库名只记在 state 里：无参与 status 沿用，sync 一律退 64（写操作的目标要每次明说）',
   async () => {
     const h = await harness()

@@ -65,6 +65,17 @@ $ agent-man-yuQue
 退 **0**，不是 64：本体把零件的无参输出当「答话」，非 0 会被记进 failures 并带出 `! ` 噪声。
 缺**配置**退 0、缺**依赖**照旧 69（找不到 `agent-man` 是后端不在，不是"你不知道配哪个库"）；
 64 只留给真正要动世界的两个入口——`status` 与 `sync`，它们能让人去改配置。
+
+配置不光是「没设」，还有「写错」：库名没有斜杠、`YUQUE_API_BASE` 不是 `http(s)://` 开头、
+`YUQUE_TIMEOUT_MS` 不是正整数，一个样——退 **0**、只给一句答话，错在哪个键由 stderr 那行 `! ` 说清：
+
+```console
+$ YUQUE_NAMESPACE=abcdef agent-man-yuQue
+语雀：配置有问题，先看 ! 那行
+! YUQUE_NAMESPACE 要写成「登录名/库slug」，拿到「abcdef」        # 这一行走 stderr
+```
+
+（`status` / `sync` 遇到同样的配置错照旧退 64：那两个入口的读者正要按这句话去改环境变量。）
 库名的三条规矩：`sync` 每次都要由 `YUQUE_NAMESPACE` 明说（写操作不许靠"上次往哪写"猜目标，
 缺了就 64）；`status` 与无参允许沿用 `state.json` 里记过的上次库名，两者都没有才报缺库。
 
