@@ -485,6 +485,69 @@ test('无参：库名没设、state 里也没记过 → 退 0 只差一句话，
   assert.equal(fs.existsSync(h.statePath), false, '无参不许写盘')
 })
 
+// 无参是"答话"：配置写错也一样——缺库有自己那句更贴切的话，别的配置错各自给一句 +
+// 一行 `! ` 指出错在哪个键。64 只留给 status / sync（它们才是有机会让人去改配置的入口）。
+test('无参遇到配置写错（库名/基址/超时）：退 0 只答一句话，具体错在哪个键走 ! 那行', async () => {
+  const cases = [
+    { name: '库名没斜杠', env: { YUQUE_NAMESPACE: 'abcdef' }, key: 'YUQUE_NAMESPACE' },
+    { name: '基址不是 http(s)', env: { YUQUE_API_BASE: 'ftp://x' }, key: 'YUQUE_API_BASE' },
+    { name: '超时不是正整数', env: { YUQUE_TIMEOUT_MS: '0' }, key: 'YUQUE_TIMEOUT_MS' },
+  ]
+  for (const one of cases) {
+    const h = await harness({ env: one.env })
+    const r = await h.run([])
+    assert.equal(r.code, 0, `${one.name}：无参退非 0 会被本体记进 failures`)
+    assert.equal(r.lines.length, 1, `${one.name}：只许一行答话`)
+    assert.ok(costOf(r.lines[0]) <= 30, `${one.name}：这一行要塞进骨架预算，现在 ${costOf(r.lines[0])}`)
+    assert.ok(r.err.startsWith('! '), `${one.name}：错在哪要走 ! 那行：${r.err}`)
+    assert.ok(r.err.includes(one.key), `${one.name}：! 那行要点名出错的是哪个键：${r.err}`)
+    assert.equal(h.agent.calls().length, 0, `${one.name}：配置就不对，本体进程一个都别起`)
+    assert.equal(h.yuque.requests.length, 0, `${one.name}：无参不许联网`)
+    assert.equal(fs.existsSync(h.statePath), false, `${one.name}：无参不许写盘`)
+  }
+  // 反过来：status / sync 是"能让人去改配置"的入口，配置错照旧退 64。
+  const h = await harness({ env: { YUQUE_API_BASE: 'ftp://x' } })
+  assert.equal((await h.run(['status'])).code, 64, 'status 照旧 64')
+  assert.equal((await h.run(['sync'])).code, 64, 'sync 照旧 64')
+})
+
+// 无参的读者是本体：骨架按 describe 声明的 5000ms 硬杀，超了整块记进 failures，读者看到的是"零件坏了"。
+// 所以无参得在 4s 前先给一句话——不能等单条命令的 20s，也不能等语雀自己的 15s。
+test('无参等不起就退 0 说一句话：本体慢慢答也不许拖到骨架硬杀', async () => {
+  const h = await harness({ scenario: { sleep: 7000 } })
+  const started = Date.now()
+  const r = await h.run([])
+  const spent = Date.now() - started
+  assert.equal(r.code, 0, `超时也不许退非 0：${r.err}`)
+  assert.deepEqual(r.lines, ['语雀：本体这次没答上来'], '只许一句话')
+  assert.ok(spent < 5000, `必须赶在骨架 5000ms 硬杀之前收工，实际 ${spent}ms`)
+  assert.ok(r.err.startsWith('! '), `等超了要走 ! 那行：${r.err}`)
+  assert.ok(r.err.includes('4000ms'), `! 那行要说清等了多少：${r.err}`)
+  assert.equal(fs.existsSync(h.statePath), false, '等超了也不许写盘')
+  assert.equal(h.yuque.requests.length, 0, '更不许联网')
+})
+
+// --only 的合法值就两个（写死的两篇）：写错了当场退 64，不必先起四个本体进程、等它答完再报。
+test('--only 写错当场退 64：一个本体进程都不起', async () => {
+  const h = await harness()
+  const r = await h.run(['sync', '--dry-run', '--only', 'bogus'])
+  assert.equal(r.code, 64, r.err)
+  assert.ok(r.err.includes('bogus'), `要点名拿到的是什么：${r.err}`)
+  assert.equal(h.agent.calls().length, 0, '参数就不对，别去骚扰本体')
+})
+
+// 坏 state.json 的警告和"配置写错"是两件事，但两件都该被看到：
+// 早退分支（配置错 / 本体慢）不许把读盘时攒下的 `! ` 一起吞掉。
+test('坏 state.json 撞上配置写错：两句 ! 都要出现', async () => {
+  const h = await harness({ env: { YUQUE_API_BASE: 'ftp://x' } })
+  fs.writeFileSync(h.statePath, '{不是 JSON', 'utf8')
+  const r = await h.run([])
+  assert.equal(r.code, 0, r.err)
+  assert.deepEqual(r.lines, ['语雀：配置有问题，先看 ! 那行'])
+  assert.ok(r.err.includes('state.json'), `读盘那句警告被吞了：${r.err}`)
+  assert.ok(r.err.includes('YUQUE_API_BASE'), `配置错的那句没了：${r.err}`)
+})
+
 test('库名只记在 state 里：无参与 status 沿用，sync 一律退 64（写操作的目标要每次明说）',
   async () => {
     const h = await harness()
