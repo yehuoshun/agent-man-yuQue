@@ -90,25 +90,33 @@ $ YUQUE_NAMESPACE=abcdef agent-man-yuQue
 而省进程就得拿正确性换（缓存会让「本体刚改过」这一行说假话），不如把这 ~1 秒摊开说明。
 要更快就只能少问：别让本体在每次开口前都问一遍零件，或接受这一秒。
 
+这条路上还有一条 4 秒的**总期限**（`SENSE_DEADLINE_MS`，比 `--describe` 声明的 5000ms 早 1 秒，
+留出进程启动与渲染的时间）：四份取数到点没答完就一起撤掉，退 0 只说一句话
+`语雀：本体这次没答上来`，等了多少走 stderr 那行 `! `。没有这条期限，无参可能跑 7 秒以上，
+而骨架按 5000ms 就把整个零件判成超时——读者看到的会是"零件坏了"，其实只是它太慢。
+
 ### 3. `status`：本地状态（不联网）
 
 ```console
 $ agent-man-yuQue status
-上次同步    2026-11-20 00:31（4h 前）
-处境        落后：内容变了
-  agent-man-situation  https://www.yuque.com/你的登录名/你的库短名/agent-man-situation
-记忆        一致：3h 前
-  agent-man-memory     https://www.yuque.com/你的登录名/你的库短名/agent-man-memory
+语雀 · 你的登录名/你的库短名（数据目录 C:\Users\你\.agent-man-yuque）
+  上次同步  2026-11-20T00:31:12+08:00（4h 前）
+  处境  agent-man-situation  内容变了  https://www.yuque.com/你的登录名/你的库短名/agent-man-situation
+  记忆  agent-man-memory  一致  https://www.yuque.com/你的登录名/你的库短名/agent-man-memory
 ```
+
+首行说清"这份状态属于哪个库、数据目录在哪"；第二行是上次真推上去的时刻（一次没推过就说
+「还没同步过」）；再往下每篇一行，`标签  短名  为什么  URL`。正文推上去了、目录树没挂上时，
+多一行 `  目录树    上次没挂上，下次 sync 会补`。
 
 `status --json` 一行、不缩进，给机器读：
 
 ```console
 $ agent-man-yuQue status --json
-{"lastAt":"2026-11-20T00:31:12+08:00","tocAt":null,"tocPending":false,"docs":[…]}
+{"namespace":"你的登录名/你的库短名","home":"…","lastAt":"2026-11-20T00:31:12+08:00","tocAt":null,"tocPending":false,"docs":[…]}
 ```
 
-`docs` 里每篇是 `{slug,title,url,hash,syncedAt,stale,why}`，`hash` 是 64 位 sha256。
+`docs` 里每篇是 `{key,label,slug,title,url,hash,syncedAt,stale,why}`，`hash` 是 64 位 sha256。
 
 `why` 只有三种：`还没同步过` / `内容变了` / `一致`。
 
